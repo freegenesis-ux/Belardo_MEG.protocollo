@@ -1,0 +1,86 @@
+name: MEG Fetch
+
+# Due velocità distinte, per non sprecare risorse e non martellare le fonti
+# istituzionali con una frequenza che non hanno mai:
+#   - "fast": solo fonti strutturate a variazione rapida (mercati, sismologia)
+#     ogni 15 minuti — dati che cambiano davvero a quella velocità.
+#   - "full": tutte le macro-aree, incluse le RSS istituzionali (ECB, Fed,
+#     IMF, ecc.) ogni ora — quelle fonti pubblicano poche volte al giorno,
+#     interrogarle più spesso è solo spreco e rischio di essere rate-limited.
+#
+# NB: repo pubblico necessario per questa cadenza — i minuti runner
+# GitHub-hosted sono illimitati solo su repo pubblici. Su repo privato,
+# ogni 15 min sfora rapidamente le 2000 min/mese gratuite.
+#
+# NB: lo scheduler di GitHub Actions è best-effort: nei picchi di carico
+# della piattaforma i cron molto frequenti possono slittare di qualche
+# minuto o saltare un ciclo — "ogni 15 min" va inteso come "circa".
+#
+# Link stabile risultante:
+#   https://raw.githubusercontent.com/<utente>/<repo>/main/meg_events/latest.jsonl
+#   https://raw.githubusercontent.com/<utente>/<repo>/main/meg_events/latest_fast.jsonl
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # fast: mercati + sismologia
+    - cron: "0 * * * *"      # full: tutte le macro-aree, ogni ora in punto
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "fast (solo mercati/sismologia) o full (tutte le aree)"
+        default: "full"
+        type: choice
+        options: ["fast", "full"]
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installa dipendenze
+        run: pip install httpx feedparser pyyaml
+
+      - name: Determina modalità (fast/full) dal trigger
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "*/15 * * * *" ]; then
+            echo "value=fast" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=full" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch FAST — B7 mercati + B2_1_2 sismologia
+        if: steps.mode.outputs.value == 'fast'
+        run: |
+          python3 meg_fetcher.py --area B7 --out meg_events/latest_fast_b7.jsonl
+          python3 meg_fetcher.py --area B2_1_2 --out meg_events/latest_fast_b2.jsonl
+          cat meg_events/latest_fast_b7.jsonl meg_events/latest_fast_b2.jsonl > meg_events/latest_fast.jsonl
+
+      - name: Fetch FULL — tutte le macro-aree
+        if: steps.mode.outputs.value == 'full'
+        run: python3 meg_fetcher.py --out meg_events/latest.jsonl
+
+      - name: Copia in archivio timestampato (solo run full)
+        if: steps.mode.outputs.value == 'full'
+        run: |
+          mkdir -p meg_events/archive
+          cp meg_events/latest.jsonl "meg_events/archive/meg_events_$(date -u +%Y%m%d_%H%M).jsonl"
+
+      - name: Commit e push dei nuovi dati
+        run: |
+          git config user.name "meg-bot"
+          git config user.email "meg-bot@users.noreply.github.com"
+          git add meg_events/
+          git diff --quiet --cached || git commit -m "MEG (${{ steps.mode.outputs.value }}): aggiornamento $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
+
