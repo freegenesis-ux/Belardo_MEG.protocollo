@@ -1,0 +1,373 @@
+protocol:
+  name: "MEG"
+  version: "3.0"
+  fixed_date: "2026-06-19"
+  description: >
+    Monitoraggio Eventi Globali. Architettura ibrida: definizione dichiarativa (questo file)
+    + motore di enforcement (meg_engine.py) che verifica oggettivamente, tramite log,
+    se le fasi obbligatorie sono state eseguite prima di autorizzare la redazione del report.
+
+# ============================================================
+# SOGLIE NUMERICHE — valutazione deterministica, non a giudizio
+# ============================================================
+thresholds:
+  earthquake_magnitude:
+    unit: "Mw"
+    monitor: 6.0
+    max_alert: 7.5
+    direction: "above"
+
+  sst_anomaly:
+    unit: "°C"
+    monitor: 3.0
+    max_alert: 5.0
+    direction: "absolute"
+
+  tsunami_wave_height:
+    unit: "m"
+    monitor: 2.0
+    max_alert: 5.0
+    direction: "above"
+
+  hurricane_wind_speed:
+    unit: "mph"
+    monitor: 115
+    max_alert: 156   # Cat. 5 soglia reale Saffir-Simpson
+    direction: "above"
+
+  thermal_anomaly:
+    unit: "°C"
+    monitor: 10.0
+    max_alert: 15.0
+    direction: "absolute"
+
+  geomagnetic_storm:
+    unit: "G-scale"
+    monitor: 3
+    max_alert: 5
+    direction: "above"
+
+  neo_diameter:
+    unit: "m"
+    monitor: 30
+    max_alert: 150
+    direction: "above"
+
+  mass_mobilization:
+    unit: "persone"
+    monitor: 500000
+    max_alert: 1500000
+    direction: "above"
+
+  water_basin_capacity:
+    unit: "% capacità"
+    monitor: 40
+    max_alert: 20
+    direction: "below"
+    note: "soglia per bacini che servono >500.000 abitanti"
+
+  spi_spei_index:
+    unit: "index"
+    monitor: -1.5
+    max_alert: -2.0
+    direction: "below"
+
+  cassano_irpino_flow:
+    unit: "l/s"
+    monitor: 1800
+    max_alert: 1000
+    direction: "below"
+
+  sorgente_sanita_flow:
+    unit: "l/s"
+    monitor: 3200
+    max_alert: 1800
+    direction: "below"
+
+  subsidence_rate:
+    unit: "mm/anno"
+    monitor: 5
+    max_alert: 25
+    direction: "above"
+
+  coastal_erosion_rate:
+    unit: "m/anno"
+    monitor: 1.0
+    max_alert: null   # nessuna soglia massima numerica fissa - richiede valutazione qualitativa
+    direction: "above"
+    note: "su tratto costiero >5km"
+
+  desertification_area:
+    unit: "km²"
+    monitor: 1000
+    max_alert: null
+    direction: "above"
+    note: "nuova area documentata in avanzamento; soglia massima è dichiarazione UNCCD"
+
+  strategic_reserves_days:
+    unit: "giorni di importazione netta"
+    monitor: 60
+    max_alert: 30
+    direction: "below"
+    note: "obbligo IEA/UE: 90 giorni; sotto 60 = erosione preoccupante, sotto 30 = critica"
+
+  gas_price_volatility:
+    unit: "€/MWh"
+    monitor: 50
+    max_alert: 80
+    direction: "above"
+    note: "prezzo medio europeo TTF; baseline storica pre-crisi ~30€/MWh"
+
+  energy_inflation_delta:
+    unit: "% punti aggiuntivi"
+    monitor: 1.0
+    max_alert: 3.0
+    direction: "above"
+    note: "inflazione energetica aggiuntiva rispetto a baseline OCSE/UE"
+
+  vix_level:
+    unit: "index"
+    monitor: 25
+    max_alert: 35
+    direction: "above"
+    note: "CBOE VIX — indice di volatilità/paura; sopra 35 storicamente coincide con fasi acute (2008, 2020)"
+
+  stock_index_drawdown:
+    unit: "% variazione giornaliera"
+    monitor: -3.0
+    max_alert: -5.0
+    direction: "below"
+    note: "variazione giornaliera indice azionario di riferimento (S&P 500 / DAX)"
+
+  gold_price_surge:
+    unit: "% variazione giornaliera"
+    monitor: 3.0
+    max_alert: 5.0
+    direction: "absolute"
+    note: "movimento anomalo dell'oro spot — proxy di flight-to-safety"
+
+  fx_volatility:
+    unit: "% variazione giornaliera"
+    monitor: 1.5
+    max_alert: 2.5
+    direction: "absolute"
+    note: "EUR/USD — soglie tarate su una coppia storicamente poco volatile; movimenti oltre 1.5%/giorno sono rari e segnalano stress"
+
+  sovereign_spread_btp_bund:
+    unit: "punti base"
+    monitor: 200
+    max_alert: 300
+    direction: "above"
+    note: "spread BTP-Bund 10Y; non automatizzato da fetcher (nessuna fonte gratuita stabile no-key) — valore va inserito da reasoning dopo query dedicata"
+
+  industrial_rationing_signal:
+    unit: "booleano (0/1)"
+    monitor: 1
+    max_alert: 1
+    direction: "above"
+    note: "1 = razionamento industriale formalmente annunciato o avviato da governo/ARERA/Terna"
+
+# ============================================================
+# MACRO-AREE E SOTTOSEZIONI
+# ============================================================
+macro_areas:
+
+  B1:
+    name: "Politica, Geopolitica e Conflitti"
+    min_queries_required: 4
+    queries:
+      - "armed conflict escalation latest {date}"
+      - "military strike attack today"
+      - "ceasefire agreement collapse today"
+      - "political leader killed arrested crisis"
+      - "sanctions embargo announced today"
+    institutional_sources: []
+
+  B2_1_2:
+    name: "Sismologia e Vulcanologia"
+    min_queries_required: 3
+    queries:
+      - "earthquake magnitude 6 today"
+      - "volcano eruption alert latest"
+      - "tsunami warning issued today"
+    institutional_sources:
+      - { name: "USGS", url: "https://earthquake.usgs.gov/earthquakes/map" }
+      - { name: "INGV", url: "https://www.ingv.it" }
+    mandatory: true
+
+  B2_3:
+    name: "Idrogeologia"
+    min_queries_required: 3
+    queries:
+      - "land subsidence sinking ground latest report"
+      - "coastal erosion accelerating {region} {year}"
+      - "desertification report new data {year}"
+      - "glacial isostatic adjustment crustal rebound study"
+      - "wetland loss expansion satellite data latest"
+    institutional_sources:
+      - { name: "ISPRA", url: "https://www.isprambiente.gov.it" }
+      - { name: "Copernicus C3S", url: "https://climate.copernicus.eu" }
+
+  B3:
+    name: "Meteorologia Estrema e Spazio"
+    min_queries_required: 3
+    queries:
+      - "geomagnetic storm G3 G4 G5 today"
+      - "hurricane typhoon category 3 4 5 latest"
+      - "extreme heat cold record today"
+      - "near earth object asteroid warning"
+    institutional_sources:
+      - { name: "NOAA SWPC", url: "https://www.spaceweather.gov" }
+    mandatory: true
+
+  B4_1:
+    name: "Sicurezza Alimentare e Flussi Migratori"
+    min_queries_required: 2
+    queries:
+      - "famine declared food crisis today"
+      - "fertilizer price spike food shortage latest"
+      - "refugee displacement mass migration today"
+    institutional_sources: []
+
+  B4_2:
+    name: "Idrologia Civile Globale"
+    min_queries_required: 3
+    queries:
+      - "drought water supply civilian shortage {region} {date}"
+      - "reservoir level record low drinking water {date}"
+      - "precipitation deficit SPI drought alert {date}"
+    institutional_sources:
+      - { name: "Copernicus EDO", url: "https://edo.jrc.ec.europa.eu" }
+      - { name: "NOAA Drought Monitor", url: "https://drought.gov" }
+
+  B4_3:
+    name: "Idrologia Locale Campania / Appennino Meridionale"
+    min_queries_required: 3
+    queries:
+      - "Cassano Irpino portata sorgenti {month_year}"
+      - "Sorgente Sanita Caposele disponibilita idrica {month_year}"
+      - "Alto Calore Servizi sospensione emergenza acqua {date}"
+    institutional_sources:
+      - { name: "ABDAM Osservatorio", url: "https://www.distrettoappenninomeridionale.it/novita/osservatorio-permanente-sugli-utilizzi-idrici" }
+      - { name: "AQP Sorgenti", url: "https://www.aqp.it/scopri-acquedotto/gli-impianti/sorgenti" }
+
+  B5:
+    name: "Tecnologia, AI e Biosicurezza"
+    min_queries_required: 2
+    queries:
+      - "cyberattack critical infrastructure today"
+      - "disease outbreak WHO alert today"
+      - "nuclear incident radiological accident today"
+      - "AI weapons military autonomous system deployed"
+    institutional_sources: []
+
+  B6:
+    name: "Sicurezza Energetica e Continuita dei Servizi Essenziali"
+    min_queries_required: 4
+    queries:
+      - "energy crisis gas oil supply disruption today"
+      - "energy rationing blackout risk {country} {date}"
+      - "strategic petroleum reserve days {country} latest"
+      - "gas price TTF spike today"
+      - "Hormuz strait closure impact energy {date}"
+      - "industrial energy rationing announced {date}"
+    institutional_sources:
+      - { name: "IEA", url: "https://www.iea.org" }
+      - { name: "ARERA", url: "https://www.arera.it" }
+      - { name: "Terna", url: "https://www.terna.it" }
+      - { name: "SNAM", url: "https://www.snam.it" }
+    mandatory: true
+    note: >
+      Famiglia causale distinta da B1 (geopolitica = causa) e da B4 (cibo/acqua = altro bene essenziale).
+      B6 monitora la continuita dei servizi energetici come bene essenziale a se stante: riserve,
+      prezzi, segnali di razionamento industriale o civile.
+
+  B7:
+    name: "Economia e Mercati Globali"
+    min_queries_required: 4
+    queries:
+      - "stock market crash sell-off today"
+      - "central bank emergency rate decision today"
+      - "sovereign debt crisis default risk latest"
+      - "BTP Bund spread allargamento oggi"
+      - "banking crisis bank run contagion today"
+      - "recession signal yield curve inversion latest"
+    institutional_sources:
+      - { name: "ECB", url: "https://www.ecb.europa.eu" }
+      - { name: "Federal Reserve", url: "https://www.federalreserve.gov" }
+      - { name: "IMF", url: "https://www.imf.org" }
+    mandatory: true
+    note: >
+      Famiglia causale distinta da B6 (energia = bene essenziale specifico) e da B1 (geopolitica
+      = causa politica). B7 monitora la stabilità finanziaria e monetaria come dominio a sé:
+      mercati azionari, valute, banche centrali, debito sovrano. Spesso è EFFETTO di B1/B6
+      (es. shock energetico -> inflazione -> stretta monetaria) più che causa autonoma: nel
+      report va sempre verificato il collegamento causale con le altre macro-aree attive.
+
+# ============================================================
+# FASI SEQUENZIALI OBBLIGATORIE
+# ============================================================
+phases:
+  - id: "C0_orientamento"
+    description: "Acquisizione data/ora UTC corrente. Definizione finestra rolling 48h."
+    gate_required_for: ["C1_audit_prime_pagine"]
+
+  - id: "C1_audit_prime_pagine"
+    description: "Fetch obbligatorio homepage Tier 1: Reuters, CNN, BBC, AP, Al Jazeera"
+    required_sources:
+      - "reuters.com"
+      - "edition.cnn.com"
+      - "bbc.com"
+      - "apnews.com"
+      - "aljazeera.com"
+    min_sources_fetched: 4
+    gate_required_for: ["C2_interrogazione_strutturale"]
+
+  - id: "C2_interrogazione_strutturale"
+    description: "Esecuzione query strutturali per ogni macro-area secondo min_queries_required."
+    gate_required_for: ["C3_matrice_copertura"]
+
+  - id: "C3_matrice_copertura"
+    description: "Validazione automatica copertura per macro-area (eseguita da meg_engine.py)."
+    gate_required_for: ["C4_anti_punto_cieco"]
+
+  - id: "C4_anti_punto_cieco"
+    description: "Query finali anti-punto cieco."
+    queries:
+      - "breaking news today {date}"
+      - "most important story today {date}"
+    min_sources_fetched: 1
+    gate_required_for: ["C5_redazione"]
+
+  - id: "C5_redazione"
+    description: "Redazione del report. SBLOCCATA SOLO se tutte le fasi precedenti risultano PASS."
+    gate_required_for: []
+
+# ============================================================
+# FLAG DI QUALITA DATO
+# ============================================================
+quality_flags:
+  VERIFICATO: "Fonte Tier 1 confermata, cross-check completato"
+  IN_VERIFICA: "Fonte Tier 2, cross-check non completato"
+  IPOTESI_DI_LAVORO: "Plausibile, non confermato da fonte indipendente"
+  COPERTURA_PARZIALE: "Macro-area con interrogazione incompleta"
+  SMENTITO: "Dato precedente confutato da fonte verificata"
+
+tier1_sources:
+  - reuters.com
+  - apnews.com
+  - bbc.com
+  - edition.cnn.com
+  - aljazeera.com
+  - usgs.gov
+  - noaa.gov
+  - ingv.it
+  - who.int
+  - un.org
+  - isprambiente.gov.it
+  - distrettoappenninomeridionale.it
+  - aqp.it
+  - iaea.org
+  - ecb.europa.eu
+  - federalreserve.gov
+  - imf.org
