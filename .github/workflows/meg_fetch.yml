@@ -32,6 +32,10 @@ on:
         type: choice
         options: ["fast", "full"]
 
+concurrency:
+  group: meg-fetch
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
