@@ -97,8 +97,6 @@ jobs:
           if [ -f meg_events/latest_fast.jsonl ]; then
             FILES="$FILES meg_events/latest_fast.jsonl meg_events/latest_fast_b2.jsonl meg_events/latest_fast_b7.jsonl"
           fi
-          gh release upload latest $FILES --clobber 2>/dev/null || \
-          gh release create latest $FILES \
-            --title "MEG latest" \
-            --notes "Aggiornamento automatico $(date -u +%Y-%m-%dT%H:%MZ)"
-
+          gh release upload latest $FILES --clobber || \
+          gh release upload latest $FILES --clobber || \
+          gh release upload latest $FILES --clobber
