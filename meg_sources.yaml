@@ -50,11 +50,12 @@ sources:
       url: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.geojson
       type: geojson
       tier: 1
-    - id: ingv_rss
-      label: INGV Sismico
-      url: http://cnt.rm.ingv.it/feed/atom/2.5/week
-      type: rss
+    - id: ingv_webservice
+      label: INGV Eventi Sismici (FDSNWS)
+      url: https://webservices.ingv.it/fdsnws/event/1/query
+      type: ingv_text
       tier: 1
+      minmag: 1.5
     - id: ptwc_tsunami
       label: PTWC Tsunami
       url: https://ptwc.weather.gov/ptwc/ptwc.php?region=atlantic

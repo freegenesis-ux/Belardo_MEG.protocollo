@@ -271,6 +271,72 @@ def normalize_usgs_feature(feature: dict, feed: dict,
     }
 
 
+def normalize_ingv_event(fields: list, feed: dict,
+                          area_id: str, area_label: str,
+                          protocol: dict) -> Optional[dict]:
+    """Parser per il formato pipe-delimited del webservice FDSNWS-event
+    INGV: EventID|Time|Lat|Lon|Depth|Author|Catalog|Contributor|
+    ContributorID|MagType|Magnitude|MagAuthor|EventLocationName|EventType"""
+    if len(fields) < 13:
+        return None
+    try:
+        event_id_raw = fields[0].strip()
+        time_str     = fields[1].strip()
+        depth        = fields[4].strip()
+        mag_str      = fields[10].strip()
+        location     = fields[12].strip()
+    except IndexError:
+        return None
+
+    if not mag_str:
+        return None
+    try:
+        mag = float(mag_str)
+    except ValueError:
+        return None
+
+    # Normalizza timestamp: "2026-07-31T17:46:43.740000" -> "...Z" (troncato ai secondi)
+    t_str = time_str.split(".")[0] + "Z" if time_str else None
+    title = f"INGV M{mag} — {location}" if location else f"INGV M{mag}"
+    depth_note = f"Profondità: {depth} km" if depth else ""
+
+    triggered, level = evaluate_threshold(mag, "earthquake_magnitude", protocol)
+
+    # Soglia locale abbassata per aree vulcaniche attive (bradisismo Campi
+    # Flegrei / Vesuvio): un M3.0 lì è operativamente rilevante anche se
+    # sotto la soglia globale pensata per sismicità generica mondiale.
+    loc_lower = location.lower()
+    is_volcanic_area = "flegrei" in loc_lower or "vesuv" in loc_lower or "pozzuoli" in loc_lower
+    note_suffix = ""
+    if is_volcanic_area and mag >= 3.0 and level in ("INATTIVO", "WATCHLIST"):
+        triggered, level = True, "ATTIVO"
+        note_suffix = " [soglia locale area vulcanica attiva — bradisismo]"
+
+    return {
+        "event_id":       make_event_id(area_id, title, feed["id"]),
+        "schema_version": SCHEMA_VER,
+        "extracted_at":   now_utc(),
+        "meg_area":       area_id,
+        "meg_area_label": area_label,
+        "source":         source_block(feed),
+        "content": {
+            "title":        title,
+            "summary":      f"Magnitudo {mag} | {location} | {depth_note}".strip(" |"),
+            "original_url": f"https://terremoti.ingv.it/event/{event_id_raw}" if event_id_raw else None,
+            "published_at": t_str,
+            "language":     "it",
+        },
+        "meg_flags": fetcher_flags(
+            threshold_key="earthquake_magnitude",
+            value=mag,
+            unit="Md",
+            triggered=triggered,
+            level=level,
+            notes=(depth_note + note_suffix).strip(),
+        ),
+    }
+
+
 def normalize_noaa_alert(alert: dict, feed: dict,
                            area_id: str, area_label: str,
                            protocol: dict) -> Optional[dict]:
@@ -449,7 +515,8 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                 events.append(ev)
         return events
     except Exception as e:
-        return []  # Silenzioso — il server logga altrove
+        print(f"  [WARN] fetch_rss_feed fallito ({feed.get('id')}): {e}")
+        return []
 
 
 async def fetch_usgs(client: httpx.AsyncClient, feed: dict,
@@ -503,6 +570,31 @@ async def fetch_nasa_eonet(client: httpx.AsyncClient, feed: dict,
         return []
 
 
+async def fetch_ingv_events(client: httpx.AsyncClient, feed: dict,
+                             area_id: str, area_label: str,
+                             protocol: dict) -> list[dict]:
+    """Fetch dal webservice FDSNWS-event INGV — formato testo pipe-delimited,
+    finestra temporale dinamica (ultime 24h), soglia minmag configurabile
+    nella fonte (default 1.5)."""
+    start = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)) \
+        .strftime("%Y-%m-%dT%H:%M:%S")
+    minmag = feed.get("minmag", 1.5)
+    url = (f"{feed['url']}?starttime={start}&minmag={minmag}"
+           f"&format=text&orderby=time")
+    events: list[dict] = []
+    try:
+        r = await fetch_with_retry(client, url, timeout=FETCH_TIMEOUT, attempts=2)
+        lines = [ln for ln in r.text.splitlines() if ln.strip() and not ln.startswith("#")]
+        for line in lines[:MAX_ITEMS * 3]:  # finestra INGV più densa di USGS
+            fields = line.split("|")
+            ev = normalize_ingv_event(fields, feed, area_id, area_label, protocol)
+            if ev:
+                events.append(ev)
+    except Exception as e:
+        print(f"  [WARN] fetch_ingv_events fallito ({feed.get('id')}): {e}")
+    return events
+
+
 async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
                           area_id: str, area_label: str,
                           protocol: dict) -> list[dict]:
@@ -513,6 +605,8 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
         return await fetch_rss_feed(client, feed, area_id, area_label, protocol)
     elif ftype == "geojson":
         return await fetch_usgs(client, feed, area_id, area_label, protocol)
+    elif ftype == "ingv_text":
+        return await fetch_ingv_events(client, feed, area_id, area_label, protocol)
     elif ftype == "stooq_multi":
         return await fetch_stooq_multi(client, feed, area_id, area_label, protocol)
     elif ftype == "json":
