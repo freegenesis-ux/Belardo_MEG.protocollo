@@ -52,6 +52,21 @@ USER_AGENTS = [
     "MEGFetcher/3.0 (+monitoraggio eventi globali; contatto operatore)",
 ]
 
+# Registro errori per source-health-check — popolato dai fetch_* che
+# falliscono realmente (non gli "empty legittimi", es. nessuno storm attivo).
+# Azzerato a inizio di ogni fetch_all() per evitare leak tra run nello stesso processo.
+FETCH_ERRORS: list[dict] = []
+
+def record_error(source_id: str, area_id: str, msg: str):
+    FETCH_ERRORS.append({
+        "source_id": source_id,
+        "area_id":   area_id,
+        "error":     str(msg)[:300],
+        "at":        now_utc(),
+    })
+    print(f"  [WARN] fonte fallita ({source_id}, area {area_id}): {msg}")
+
+
 async def fetch_with_retry(client: httpx.AsyncClient, url: str,
                             timeout: float = FETCH_TIMEOUT, attempts: int = 2):
     """GET con retry e rotazione User-Agent. Solleva l'ultima eccezione se
@@ -495,7 +510,8 @@ async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
                                           area_label, protocol)
             if ev:
                 events.append(ev)
-        except Exception:
+        except Exception as e:
+            record_error(f"{feed.get('id','?')}_{symbol}", area_id, e)
             continue  # simbolo singolo non raggiungibile — non blocca gli altri
     return events
 
@@ -515,7 +531,7 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                 events.append(ev)
         return events
     except Exception as e:
-        print(f"  [WARN] fetch_rss_feed fallito ({feed.get('id')}): {e}")
+        record_error(feed.get("id", "?"), area_id, e)
         return []
 
 
@@ -532,7 +548,8 @@ async def fetch_usgs(client: httpx.AsyncClient, feed: dict,
             if ev:
                 events.append(ev)
         return events
-    except Exception:
+    except Exception as e:
+        record_error(feed.get("id","?"), area_id, e)
         return []
 
 
@@ -549,7 +566,8 @@ async def fetch_noaa_swpc(client: httpx.AsyncClient, feed: dict,
             if ev:
                 events.append(ev)
         return events
-    except Exception:
+    except Exception as e:
+        record_error(feed.get("id","?"), area_id, e)
         return []
 
 
@@ -566,7 +584,8 @@ async def fetch_nasa_eonet(client: httpx.AsyncClient, feed: dict,
             if ev:
                 events.append(ev)
         return events
-    except Exception:
+    except Exception as e:
+        record_error(feed.get("id","?"), area_id, e)
         return []
 
 
@@ -619,6 +638,49 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
 
 # ── MAIN FETCH ORCHESTRATOR ───────────────────────────────────────────────────
 
+def build_protocol_record(protocol: dict) -> dict:
+    """Record di istruzioni auto-contenuto: qualunque AI o umano che apre
+    il JSONL trova qui come interpretare meg_flags, le soglie numeriche, e
+    come costruire un report — senza dipendere da documenti esterni."""
+    macro_areas_summary = {
+        area_id: {
+            "name":      area_def["name"],
+            "mandatory": area_def.get("mandatory", False),
+            "note":      (area_def.get("note") or "").strip() or None,
+        }
+        for area_id, area_def in protocol.get("macro_areas", {}).items()
+    }
+    return {
+        "record_type": "meg_protocol",
+        "protocol_version": protocol.get("protocol", {}).get("version"),
+        "generated_at": now_utc(),
+        "field_semantics": {
+            "filled_by":            "'fetcher' = valore numerico strutturato, valutato deterministicamente. 'pending_reasoning' = testo libero, richiede lettura/interpretazione da parte di un reasoning engine.",
+            "quality_flag":         protocol.get("quality_flags", {}),
+            "alert_level":          {
+                "INATTIVO":    "Nessuna soglia superata.",
+                "WATCHLIST":   "Sotto soglia di monitoraggio ma in avvicinamento (>=70% della soglia).",
+                "ATTIVO":      "Soglia di monitoraggio superata — evento rilevante confermato.",
+                "ALLERTA_MAX": "Soglia di allerta massima superata — priorità assoluta nel report.",
+            },
+            "threshold_triggered":  "true se alert_level è ATTIVO o ALLERTA_MAX.",
+            "tier":                 "1 = fonte istituzionale/primaria obbligatoria. 2 = fonte secondaria, ammessa con segnalazione esplicita.",
+        },
+        "report_construction_rules": [
+            "Includere sempre: ogni evento con alert_level ATTIVO o ALLERTA_MAX, indipendentemente dall'area.",
+            "Includere: eventi pending_reasoning il cui contenuto testuale suggerisce escalation, anche senza soglia numerica — vanno letti e valutati, non scartati automaticamente.",
+            "Scartare/riassumere in una riga sola: eventi INATTIVO privi di rilevanza contestuale (es. sismicità di fondo sotto soglia, comunicati istituzionali di routine).",
+            "Collegare causalmente eventi correlati tra aree diverse quando plausibile (es. B1 geopolitica -> B6 energia -> B7 mercati) invece di elencarli come fatti isolati.",
+            "Se un record source_status riporta status 'error' per una fonte tier 1, questo VA segnalato esplicitamente in apertura di report — non va ignorato silenziosamente.",
+            "Finestra di riferimento raccomandata: rolling 48h dal timestamp extracted_at più recente nel file, salvo diversa richiesta esplicita.",
+            "In caso di dati contrastanti tra fonti, segnalare il conflitto esplicitamente invece di produrne una media o sintesi che lo nasconda.",
+        ],
+        "thresholds": protocol.get("thresholds", {}),
+        "macro_areas": macro_areas_summary,
+        "tier1_sources": protocol.get("tier1_sources", []),
+    }
+
+
 async def fetch_all(area_filter: Optional[str] = None,
                      output_path: Optional[Path] = None) -> dict:
     """
@@ -633,6 +695,9 @@ async def fetch_all(area_filter: Optional[str] = None,
               if area_filter and area_filter in sources else sources)
 
     # Costruisce task paralleli
+    FETCH_ERRORS.clear()
+    feed_lookup = {}  # (area_id, feed_id) -> feed dict (per source_status)
+
     async with httpx.AsyncClient() as client:
         tasks = []
         meta  = []
@@ -642,6 +707,7 @@ async def fetch_all(area_filter: Optional[str] = None,
                 tasks.append(
                     fetch_one_feed(client, feed, area_id, label, protocol))
                 meta.append((area_id, feed["id"]))
+                feed_lookup[(area_id, feed["id"])] = feed
         results = await asyncio.gather(*tasks)
 
     # Appiattisce in lista eventi unica
@@ -663,12 +729,43 @@ async def fetch_all(area_filter: Optional[str] = None,
             if flags.get("filled_by") == "pending_reasoning":
                 stats["pending"] += 1
 
-    # Salva JSONL
+    # Costruisce source_status per ogni fonte interrogata in questo run
+    error_by_source = {e["source_id"]: e for e in FETCH_ERRORS}
+    source_status = []
+    for (area_id, feed_id), events in zip(meta, results):
+        feed = feed_lookup.get((area_id, feed_id), {})
+        err = error_by_source.get(feed_id)
+        if err:
+            status = "error"
+        elif len(events) == 0:
+            status = "empty"
+        else:
+            status = "ok"
+        source_status.append({
+            "id":              feed_id,
+            "area":            area_id,
+            "label":           feed.get("label"),
+            "tier":            feed.get("tier", 2),
+            "type":            feed.get("type"),
+            "status":          status,
+            "events_returned": len(events),
+            "error":           err["error"] if err else None,
+        })
+
+    # Salva JSONL — record di metadata sempre in testa, poi gli eventi
     OUTPUT_DIR.mkdir(exist_ok=True)
     if output_path is None:
         output_path = OUTPUT_DIR / f"meg_events_{ts_file()}.jsonl"
 
     with open(output_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(build_protocol_record(protocol), ensure_ascii=False) + "\n")
+        f.write(json.dumps({
+            "record_type": "source_status",
+            "checked_at":  now_utc(),
+            "sources":     source_status,
+            "failed_count": sum(1 for s in source_status if s["status"] == "error"),
+            "empty_count":  sum(1 for s in source_status if s["status"] == "empty"),
+        }, ensure_ascii=False) + "\n")
         for ev in all_events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
