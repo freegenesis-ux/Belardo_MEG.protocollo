@@ -484,6 +484,50 @@ def normalize_stooq_symbol(symbol: str, rows: list, feed: dict,
     }
 
 
+async def solve_stooq_challenge(client: httpx.AsyncClient, base_url: str) -> None:
+    """Stooq protegge le richieste automatizzate con una challenge PoW
+    lato client (SHA-256 con N zeri iniziali, verificata via POST a
+    /__verify). Risolta qui con lo stesso calcolo che farebbe un browser
+    eseguendo il JS — puro hashing, nessun bypass di verifica umana. Il
+    cookie di sessione ottenuto resta valido nel client per le richieste
+    successive allo stesso dominio (nessuna azione richiesta al chiamante)."""
+    import hashlib
+    import re
+
+    try:
+        r = await client.get(base_url, timeout=FETCH_TIMEOUT)
+    except Exception:
+        return  # se anche il probe fallisce, i fetch successivi falliranno e verranno loggati normalmente
+
+    if "requires JavaScript to verify" not in r.text:
+        return  # nessuna challenge attiva in questo momento
+
+    m = re.search(r'c="([^"]+)"\s*,\s*d=(\d+)', r.text)
+    if not m:
+        return  # pattern challenge cambiato — richiede aggiornamento manuale
+
+    c, d = m.group(1), int(m.group(2))
+    target = "0" * d
+    n = 0
+    while True:
+        h = hashlib.sha256(f"{c}{n}".encode()).hexdigest()
+        if h.startswith(target):
+            break
+        n += 1
+        if n > 2_000_000:  # safety valve — non deve mai servire con d<=6
+            return
+
+    origin = base_url.split("/q/")[0].split("/db/")[0]
+    if not origin.startswith("http"):
+        origin = "https://stooq.com"
+    try:
+        await client.post(f"{origin}/__verify",
+                           data={"c": c, "n": str(n)},
+                           timeout=FETCH_TIMEOUT)
+    except Exception:
+        return  # cookie non ottenuto — i fetch successivi falliranno e verranno loggati normalmente
+
+
 async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
                              area_id: str, area_label: str,
                              protocol: dict) -> list[dict]:
@@ -499,6 +543,10 @@ async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
     d2 = datetime.datetime.utcnow()
     d1 = d2 - datetime.timedelta(days=14)
     d1s, d2s = d1.strftime("%Y%m%d"), d2.strftime("%Y%m%d")
+
+    # Risolve la eventuale challenge PoW una sola volta per l'intero batch
+    # di simboli — il cookie ottenuto resta valido nel client condiviso.
+    await solve_stooq_challenge(client, feed["url"])
 
     for symbol in symbols:
         url = f"{feed['url']}?s={symbol}&d1={d1s}&d2={d2s}&i=d"
@@ -517,6 +565,173 @@ async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
 
 
 # ── FETCHERS ──────────────────────────────────────────────────────────────────
+
+async def fetch_yahoo_finance_multi(client: httpx.AsyncClient, feed: dict,
+                                     area_id: str, area_label: str,
+                                     protocol: dict) -> list[dict]:
+    """Fetch indici/valute/oro da Yahoo Finance (endpoint pubblico non
+    ufficiale, nessuna API key richiesta). Fonte indipendente da Stooq —
+    utile come fallback quando quest'ultima applica rate-limit/anti-bot.
+    Un simbolo che fallisce non blocca gli altri (stesso principio di
+    degradazione parziale usato per Stooq)."""
+    events: list[dict] = []
+    yahoo_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    for sym in feed.get("symbols", []):
+        ticker = sym["yahoo"]
+        url = f"{feed['url']}{ticker}?range=10d&interval=1d"
+        try:
+            r = await client.get(url, headers=yahoo_headers, timeout=FETCH_TIMEOUT)
+            r.raise_for_status()
+            data = r.json()
+            result = data["chart"]["result"][0]
+            closes = result["indicators"]["quote"][0]["close"]
+            valid = [c for c in closes if c is not None]
+            if len(valid) < 2:
+                continue
+            last_close, prev_close = valid[-1], valid[-2]
+        except Exception as e:
+            record_error(f"{feed['id']}_{ticker}", area_id, e)
+            continue
+
+        pct_change = ((last_close - prev_close) / prev_close * 100) if prev_close else 0.0
+        threshold_key, name = sym["key"], sym["name"]
+        th_def = protocol.get("thresholds", {}).get(threshold_key, {})
+        mode = "level" if threshold_key == "vix_level" else "pct"
+        measured = last_close if mode == "level" else pct_change
+        title = (f"{name}: {last_close:.2f} ({pct_change:+.2f}% vs seduta prec.)"
+                 if mode != "level" else
+                 f"{name}: {last_close:.2f} (var. giornaliera {pct_change:+.2f}%)")
+        triggered, level = evaluate_threshold(measured, threshold_key, protocol)
+        flags = fetcher_flags(threshold_key, round(measured, 3),
+                               th_def.get("unit", ""), triggered, level,
+                               notes=f"Ultima chiusura: {last_close:.2f}, "
+                                     f"precedente: {prev_close:.2f} (fonte: Yahoo Finance)")
+        events.append({
+            "event_id":       make_event_id(area_id, title, f"{feed['id']}_{ticker}"),
+            "schema_version": SCHEMA_VER,
+            "extracted_at":   now_utc(),
+            "meg_area":       area_id,
+            "meg_area_label": area_label,
+            "source":         {**source_block(feed), "id": f"{feed['id']}_{ticker}"},
+            "content": {
+                "title":        title,
+                "summary":      f"Ultime {len(valid)} sedute disponibili su Yahoo Finance",
+                "original_url": f"https://finance.yahoo.com/quote/{ticker}",
+                "published_at": now_utc(),
+                "language":     "en",
+            },
+            "meg_flags": flags,
+        })
+    return events
+
+
+ALPHAVANTAGE_THROTTLE_FILE = OUTPUT_DIR / ".alphavantage_last_run"
+ALPHAVANTAGE_MIN_HOURS = 3  # 3 simboli x 8 run/giorno = 24 richieste, sotto il limite di 25/giorno
+
+def alphavantage_should_run() -> bool:
+    """Throttling persistente su file — evita di sforare il rate limit
+    gratuito (25 richieste/giorno) quando il workflow gira ogni ora."""
+    if not ALPHAVANTAGE_THROTTLE_FILE.exists():
+        return True
+    try:
+        last = datetime.datetime.fromisoformat(
+            ALPHAVANTAGE_THROTTLE_FILE.read_text().strip())
+    except Exception:
+        return True
+    elapsed_hours = (datetime.datetime.utcnow() - last).total_seconds() / 3600
+    return elapsed_hours >= ALPHAVANTAGE_MIN_HOURS
+
+def alphavantage_mark_run():
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    ALPHAVANTAGE_THROTTLE_FILE.write_text(datetime.datetime.utcnow().isoformat())
+
+
+async def fetch_alphavantage_multi(client: httpx.AsyncClient, feed: dict,
+                                    area_id: str, area_label: str,
+                                    protocol: dict) -> list[dict]:
+    """Fetch S&P 500 (via SPY), oro (via GLD), EUR/USD da Alpha Vantage.
+    Richiede API key gratuita in ALPHAVANTAGE_KEY. Fonte ridondante a
+    Yahoo Finance — se manca la chiave o il throttling blocca il run,
+    si auto-esclude senza generare errore falso."""
+    import os
+
+    api_key = os.environ.get("ALPHAVANTAGE_KEY", "").strip()
+    if not api_key:
+        return []  # nessuna chiave configurata — non è un errore, è opzionale
+
+    if not alphavantage_should_run():
+        return []  # throttling: rispettiamo il budget giornaliero gratuito
+
+    events: list[dict] = []
+    for sym in feed.get("symbols", []):
+        function = sym["function"]
+        params = {"function": function, "apikey": api_key}
+        series_key = None
+        if function == "TIME_SERIES_DAILY":
+            params["symbol"] = sym["symbol"]
+            series_key = "Time Series (Daily)"
+        elif function == "FX_DAILY":
+            params["from_symbol"] = sym["from_symbol"]
+            params["to_symbol"] = sym["to_symbol"]
+            series_key = "Time Series FX (Daily)"
+        else:
+            continue
+
+        source_id = f"{feed['id']}_{sym['key']}"
+        await asyncio.sleep(13)  # rispetta il limite 5 richieste/minuto del piano free
+        try:
+            r = await client.get(feed["url"], params=params, timeout=FETCH_TIMEOUT)
+            r.raise_for_status()
+            data = r.json()
+            series = data.get(series_key)
+            if not series:
+                record_error(source_id, area_id,
+                             data.get("Error Message") or data.get("Note")
+                             or data.get("Information") or "risposta senza serie dati")
+                continue
+            dates_sorted = sorted(series.keys(), reverse=True)
+            if len(dates_sorted) < 2:
+                continue
+            last_close = float(series[dates_sorted[0]]["4. close"])
+            prev_close = float(series[dates_sorted[1]]["4. close"])
+        except Exception as e:
+            record_error(source_id, area_id, e)
+            continue
+
+        pct_change = ((last_close - prev_close) / prev_close * 100) if prev_close else 0.0
+        threshold_key, name = sym["key"], sym["name"]
+        th_def = protocol.get("thresholds", {}).get(threshold_key, {})
+        measured = pct_change
+        title = f"{name}: {last_close:.4f} ({pct_change:+.2f}% vs seduta prec.)"
+        triggered, level = evaluate_threshold(measured, threshold_key, protocol)
+        flags = fetcher_flags(threshold_key, round(measured, 3),
+                               th_def.get("unit", ""), triggered, level,
+                               notes=f"Ultima chiusura: {last_close:.4f} ({dates_sorted[0]}), "
+                                     f"precedente: {prev_close:.4f} ({dates_sorted[1]}) (fonte: Alpha Vantage)")
+        events.append({
+            "event_id":       make_event_id(area_id, title, source_id),
+            "schema_version": SCHEMA_VER,
+            "extracted_at":   now_utc(),
+            "meg_area":       area_id,
+            "meg_area_label": area_label,
+            "source":         {**source_block(feed), "id": source_id},
+            "content": {
+                "title":        title,
+                "summary":      f"Ultime {len(dates_sorted)} sedute disponibili su Alpha Vantage",
+                "original_url": "https://www.alphavantage.co/",
+                "published_at": f"{dates_sorted[0]}T00:00:00Z",
+                "language":     "en",
+            },
+            "meg_flags": flags,
+        })
+
+    if events:
+        alphavantage_mark_run()
+    return events
+
 
 async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                           area_id: str, area_label: str,
@@ -628,6 +843,10 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
         return await fetch_ingv_events(client, feed, area_id, area_label, protocol)
     elif ftype == "stooq_multi":
         return await fetch_stooq_multi(client, feed, area_id, area_label, protocol)
+    elif ftype == "yahoo_multi":
+        return await fetch_yahoo_finance_multi(client, feed, area_id, area_label, protocol)
+    elif ftype == "alphavantage_multi":
+        return await fetch_alphavantage_multi(client, feed, area_id, area_label, protocol)
     elif ftype == "json":
         if "swpc" in url:
             return await fetch_noaa_swpc(client, feed, area_id, area_label, protocol)

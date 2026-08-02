@@ -210,6 +210,26 @@ sources:
       type: stooq_multi
       tier: 1
       symbols: ["^spx", "^vix", "^dax", "xauusd", "eurusd"]
+    - id: yahoo_finance_multi
+      label: Yahoo Finance Indici/Valute/Oro (no-key, fallback)
+      url: https://query1.finance.yahoo.com/v8/finance/chart/
+      type: yahoo_multi
+      tier: 1
+      symbols:
+        - { yahoo: "^GSPC",    key: "stock_index_drawdown", name: "S&P 500" }
+        - { yahoo: "^VIX",     key: "vix_level",            name: "VIX" }
+        - { yahoo: "^GDAXI",   key: "stock_index_drawdown", name: "DAX" }
+        - { yahoo: "GC=F",     key: "gold_price_surge",     name: "Oro Futures (GC=F)" }
+        - { yahoo: "EURUSD=X", key: "fx_volatility",        name: "EUR/USD" }
+    - id: alphavantage_multi
+      label: Alpha Vantage S&P/Oro/EUR-USD (richiede ALPHAVANTAGE_KEY, throttled 3h)
+      url: https://www.alphavantage.co/query
+      type: alphavantage_multi
+      tier: 1
+      symbols:
+        - { function: "TIME_SERIES_DAILY", symbol: "SPY", key: "stock_index_drawdown", name: "S&P 500 (SPY ETF)" }
+        - { function: "TIME_SERIES_DAILY", symbol: "GLD", key: "gold_price_surge",     name: "Oro (GLD ETF)" }
+        - { function: "FX_DAILY", from_symbol: "EUR", to_symbol: "USD", key: "fx_volatility", name: "EUR/USD" }
     # -- Istituzionali testuali: filled_by="pending_reasoning" --
     - id: ecb_press
       label: ECB Press Releases
