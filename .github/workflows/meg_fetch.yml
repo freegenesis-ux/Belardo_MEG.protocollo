@@ -65,6 +65,8 @@ jobs:
 
       - name: Fetch FAST — B7 mercati + B2_1_2 sismologia
         if: steps.mode.outputs.value == 'fast'
+        env:
+          ALPHAVANTAGE_KEY: ${{ secrets.ALPHAVANTAGE_KEY }}
         run: |
           python3 meg_fetcher.py --area B7 --out meg_events/latest_fast_b7.jsonl
           python3 meg_fetcher.py --area B2_1_2 --out meg_events/latest_fast_b2.jsonl
@@ -72,6 +74,8 @@ jobs:
 
       - name: Fetch FULL — tutte le macro-aree
         if: steps.mode.outputs.value == 'full'
+        env:
+          ALPHAVANTAGE_KEY: ${{ secrets.ALPHAVANTAGE_KEY }}
         run: python3 meg_fetcher.py --out meg_events/latest.jsonl
 
       - name: Copia in archivio timestampato (solo run full)
