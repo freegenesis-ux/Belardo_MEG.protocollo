@@ -122,13 +122,13 @@ sources:
     label: Sicurezza Alimentare e Migrazioni
     feeds:
     - id: fao_news
-      label: FAO News
-      url: https://www.fao.org/news/rss-news-archive/rss-detail/en/
+      label: FAO News (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S2836%29"
       type: rss
       tier: 1
     - id: wfp_news
-      label: WFP News
-      url: https://www.wfp.org/news/rss
+      label: WFP News (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1741%29"
       type: rss
       tier: 1
     - id: unhcr_news

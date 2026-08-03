@@ -48,8 +48,10 @@ SCHEMA_VER    = "1.0"
 # ma molte fonti istituzionali bloccano UA "python-requests" di default:
 # ruotare UA + ritentare 1 volta alza sensibilmente il tasso di successo.
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MEGFetcher/3.0",
-    "MEGFetcher/3.0 (+monitoraggio eventi globali; contatto operatore)",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 ]
 
 # Registro errori per source-health-check — popolato dai fetch_* che
