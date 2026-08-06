@@ -48,10 +48,8 @@ SCHEMA_VER    = "1.0"
 # ma molte fonti istituzionali bloccano UA "python-requests" di default:
 # ruotare UA + ritentare 1 volta alza sensibilmente il tasso di successo.
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-    "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MEGFetcher/3.0",
+    "MEGFetcher/3.0 (+monitoraggio eventi globali; contatto operatore)",
 ]
 
 # Registro errori per source-health-check — popolato dai fetch_* che
@@ -630,156 +628,6 @@ async def fetch_yahoo_finance_multi(client: httpx.AsyncClient, feed: dict,
     return events
 
 
-ALPHAVANTAGE_THROTTLE_FILE = OUTPUT_DIR / ".alphavantage_last_run"
-ALPHAVANTAGE_MIN_HOURS = 3  # 3 simboli x 8 run/giorno = 24 richieste, sotto il limite di 25/giorno
-
-def alphavantage_should_run() -> bool:
-    """Throttling persistente su file — evita di sforare il rate limit
-    gratuito (25 richieste/giorno) quando il workflow gira ogni ora."""
-    if not ALPHAVANTAGE_THROTTLE_FILE.exists():
-        return True
-    try:
-        last = datetime.datetime.fromisoformat(
-            ALPHAVANTAGE_THROTTLE_FILE.read_text().strip())
-    except Exception:
-        return True
-    elapsed_hours = (datetime.datetime.utcnow() - last).total_seconds() / 3600
-    return elapsed_hours >= ALPHAVANTAGE_MIN_HOURS
-
-def alphavantage_mark_run():
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    ALPHAVANTAGE_THROTTLE_FILE.write_text(datetime.datetime.utcnow().isoformat())
-
-
-async def fetch_alphavantage_multi(client: httpx.AsyncClient, feed: dict,
-                                    area_id: str, area_label: str,
-                                    protocol: dict) -> list[dict]:
-    """Fetch S&P 500 (via SPY), oro (via GLD), EUR/USD da Alpha Vantage.
-    Richiede API key gratuita in ALPHAVANTAGE_KEY. Fonte ridondante a
-    Yahoo Finance — se manca la chiave o il throttling blocca il run,
-    si auto-esclude senza generare errore falso."""
-    import os
-
-    api_key = os.environ.get("ALPHAVANTAGE_KEY", "").strip()
-    if not api_key:
-        return []  # nessuna chiave configurata — non è un errore, è opzionale
-
-    if not alphavantage_should_run():
-        return []  # throttling: rispettiamo il budget giornaliero gratuito
-
-    events: list[dict] = []
-    for sym in feed.get("symbols", []):
-        function = sym["function"]
-        params = {"function": function, "apikey": api_key}
-        series_key = None
-        if function == "TIME_SERIES_DAILY":
-            params["symbol"] = sym["symbol"]
-            series_key = "Time Series (Daily)"
-        elif function == "FX_DAILY":
-            params["from_symbol"] = sym["from_symbol"]
-            params["to_symbol"] = sym["to_symbol"]
-            series_key = "Time Series FX (Daily)"
-        else:
-            continue
-
-        source_id = f"{feed['id']}_{sym['key']}"
-        await asyncio.sleep(13)  # rispetta il limite 5 richieste/minuto del piano free
-        try:
-            r = await client.get(feed["url"], params=params, timeout=FETCH_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            series = data.get(series_key)
-            if not series:
-                record_error(source_id, area_id,
-                             data.get("Error Message") or data.get("Note")
-                             or data.get("Information") or "risposta senza serie dati")
-                continue
-            dates_sorted = sorted(series.keys(), reverse=True)
-            if len(dates_sorted) < 2:
-                continue
-            last_close = float(series[dates_sorted[0]]["4. close"])
-            prev_close = float(series[dates_sorted[1]]["4. close"])
-        except Exception as e:
-            record_error(source_id, area_id, e)
-            continue
-
-        pct_change = ((last_close - prev_close) / prev_close * 100) if prev_close else 0.0
-        threshold_key, name = sym["key"], sym["name"]
-        th_def = protocol.get("thresholds", {}).get(threshold_key, {})
-        measured = pct_change
-        title = f"{name}: {last_close:.4f} ({pct_change:+.2f}% vs seduta prec.)"
-        triggered, level = evaluate_threshold(measured, threshold_key, protocol)
-        flags = fetcher_flags(threshold_key, round(measured, 3),
-                               th_def.get("unit", ""), triggered, level,
-                               notes=f"Ultima chiusura: {last_close:.4f} ({dates_sorted[0]}), "
-                                     f"precedente: {prev_close:.4f} ({dates_sorted[1]}) (fonte: Alpha Vantage)")
-        events.append({
-            "event_id":       make_event_id(area_id, title, source_id),
-            "schema_version": SCHEMA_VER,
-            "extracted_at":   now_utc(),
-            "meg_area":       area_id,
-            "meg_area_label": area_label,
-            "source":         {**source_block(feed), "id": source_id},
-            "content": {
-                "title":        title,
-                "summary":      f"Ultime {len(dates_sorted)} sedute disponibili su Alpha Vantage",
-                "original_url": "https://www.alphavantage.co/",
-                "published_at": f"{dates_sorted[0]}T00:00:00Z",
-                "language":     "en",
-            },
-            "meg_flags": flags,
-        })
-
-    if events:
-        alphavantage_mark_run()
-    return events
-
-
-async def fetch_copernicus_ems(client: httpx.AsyncClient, feed: dict,
-                                area_id: str, area_label: str,
-                                protocol: dict) -> list[dict]:
-    """Fetch attivazioni Copernicus EMS dall'API JSON pubblica (l'RSS
-    storico è stato dismesso). Dati più ricchi: paese, categoria,
-    tempo di attivazione, stato aperto/chiuso."""
-    events: list[dict] = []
-    try:
-        r = await client.get(feed["url"], timeout=FETCH_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        record_error(feed.get("id", "?"), area_id, e)
-        return []
-
-    for act in data.get("results", [])[:MAX_ITEMS]:
-        code = act.get("code", "")
-        name = act.get("name", "").strip()
-        if not name:
-            continue
-        countries = ", ".join(act.get("countries", []))
-        category = act.get("category", "")
-        closed = act.get("closed", False)
-        activation_time = act.get("activationTime", "")
-        title = f"{code} — {name}"
-
-        events.append({
-            "event_id":       make_event_id(area_id, title, feed["id"]),
-            "schema_version": SCHEMA_VER,
-            "extracted_at":   now_utc(),
-            "meg_area":       area_id,
-            "meg_area_label": area_label,
-            "source":         source_block(feed),
-            "content": {
-                "title":        title,
-                "summary":      f"Categoria: {category} | Paesi: {countries} | Stato: {'chiusa' if closed else 'attiva'}",
-                "original_url": f"https://mapping.emergency.copernicus.eu/activations/{code}/",
-                "published_at": activation_time or None,
-                "language":     "en",
-            },
-            "meg_flags": pending_flags("Attivazione Copernicus EMS — impatto da valutare"),
-        })
-    return events
-
-
 async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                           area_id: str, area_label: str,
                           protocol: dict) -> list[dict]:
@@ -892,10 +740,6 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
         return await fetch_stooq_multi(client, feed, area_id, area_label, protocol)
     elif ftype == "yahoo_multi":
         return await fetch_yahoo_finance_multi(client, feed, area_id, area_label, protocol)
-    elif ftype == "alphavantage_multi":
-        return await fetch_alphavantage_multi(client, feed, area_id, area_label, protocol)
-    elif ftype == "copernicus_ems_json":
-        return await fetch_copernicus_ems(client, feed, area_id, area_label, protocol)
     elif ftype == "json":
         if "swpc" in url:
             return await fetch_noaa_swpc(client, feed, area_id, area_label, protocol)

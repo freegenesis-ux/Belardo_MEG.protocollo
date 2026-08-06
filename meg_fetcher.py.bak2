@@ -48,26 +48,9 @@ SCHEMA_VER    = "1.0"
 # ma molte fonti istituzionali bloccano UA "python-requests" di default:
 # ruotare UA + ritentare 1 volta alza sensibilmente il tasso di successo.
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-    "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MEGFetcher/3.0",
+    "MEGFetcher/3.0 (+monitoraggio eventi globali; contatto operatore)",
 ]
-
-# Registro errori per source-health-check — popolato dai fetch_* che
-# falliscono realmente (non gli "empty legittimi", es. nessuno storm attivo).
-# Azzerato a inizio di ogni fetch_all() per evitare leak tra run nello stesso processo.
-FETCH_ERRORS: list[dict] = []
-
-def record_error(source_id: str, area_id: str, msg: str):
-    FETCH_ERRORS.append({
-        "source_id": source_id,
-        "area_id":   area_id,
-        "error":     str(msg)[:300],
-        "at":        now_utc(),
-    })
-    print(f"  [WARN] fonte fallita ({source_id}, area {area_id}): {msg}")
-
 
 async def fetch_with_retry(client: httpx.AsyncClient, url: str,
                             timeout: float = FETCH_TIMEOUT, attempts: int = 2):
@@ -486,50 +469,6 @@ def normalize_stooq_symbol(symbol: str, rows: list, feed: dict,
     }
 
 
-async def solve_stooq_challenge(client: httpx.AsyncClient, base_url: str) -> None:
-    """Stooq protegge le richieste automatizzate con una challenge PoW
-    lato client (SHA-256 con N zeri iniziali, verificata via POST a
-    /__verify). Risolta qui con lo stesso calcolo che farebbe un browser
-    eseguendo il JS — puro hashing, nessun bypass di verifica umana. Il
-    cookie di sessione ottenuto resta valido nel client per le richieste
-    successive allo stesso dominio (nessuna azione richiesta al chiamante)."""
-    import hashlib
-    import re
-
-    try:
-        r = await client.get(base_url, timeout=FETCH_TIMEOUT)
-    except Exception:
-        return  # se anche il probe fallisce, i fetch successivi falliranno e verranno loggati normalmente
-
-    if "requires JavaScript to verify" not in r.text:
-        return  # nessuna challenge attiva in questo momento
-
-    m = re.search(r'c="([^"]+)"\s*,\s*d=(\d+)', r.text)
-    if not m:
-        return  # pattern challenge cambiato — richiede aggiornamento manuale
-
-    c, d = m.group(1), int(m.group(2))
-    target = "0" * d
-    n = 0
-    while True:
-        h = hashlib.sha256(f"{c}{n}".encode()).hexdigest()
-        if h.startswith(target):
-            break
-        n += 1
-        if n > 2_000_000:  # safety valve — non deve mai servire con d<=6
-            return
-
-    origin = base_url.split("/q/")[0].split("/db/")[0]
-    if not origin.startswith("http"):
-        origin = "https://stooq.com"
-    try:
-        await client.post(f"{origin}/__verify",
-                           data={"c": c, "n": str(n)},
-                           timeout=FETCH_TIMEOUT)
-    except Exception:
-        return  # cookie non ottenuto — i fetch successivi falliranno e verranno loggati normalmente
-
-
 async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
                              area_id: str, area_label: str,
                              protocol: dict) -> list[dict]:
@@ -546,10 +485,6 @@ async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
     d1 = d2 - datetime.timedelta(days=14)
     d1s, d2s = d1.strftime("%Y%m%d"), d2.strftime("%Y%m%d")
 
-    # Risolve la eventuale challenge PoW una sola volta per l'intero batch
-    # di simboli — il cookie ottenuto resta valido nel client condiviso.
-    await solve_stooq_challenge(client, feed["url"])
-
     for symbol in symbols:
         url = f"{feed['url']}?s={symbol}&d1={d1s}&d2={d2s}&i=d"
         try:
@@ -560,225 +495,12 @@ async def fetch_stooq_multi(client: httpx.AsyncClient, feed: dict,
                                           area_label, protocol)
             if ev:
                 events.append(ev)
-        except Exception as e:
-            record_error(f"{feed.get('id','?')}_{symbol}", area_id, e)
+        except Exception:
             continue  # simbolo singolo non raggiungibile — non blocca gli altri
     return events
 
 
 # ── FETCHERS ──────────────────────────────────────────────────────────────────
-
-async def fetch_yahoo_finance_multi(client: httpx.AsyncClient, feed: dict,
-                                     area_id: str, area_label: str,
-                                     protocol: dict) -> list[dict]:
-    """Fetch indici/valute/oro da Yahoo Finance (endpoint pubblico non
-    ufficiale, nessuna API key richiesta). Fonte indipendente da Stooq —
-    utile come fallback quando quest'ultima applica rate-limit/anti-bot.
-    Un simbolo che fallisce non blocca gli altri (stesso principio di
-    degradazione parziale usato per Stooq)."""
-    events: list[dict] = []
-    yahoo_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
-    for sym in feed.get("symbols", []):
-        ticker = sym["yahoo"]
-        url = f"{feed['url']}{ticker}?range=10d&interval=1d"
-        try:
-            r = await client.get(url, headers=yahoo_headers, timeout=FETCH_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            result = data["chart"]["result"][0]
-            closes = result["indicators"]["quote"][0]["close"]
-            valid = [c for c in closes if c is not None]
-            if len(valid) < 2:
-                continue
-            last_close, prev_close = valid[-1], valid[-2]
-        except Exception as e:
-            record_error(f"{feed['id']}_{ticker}", area_id, e)
-            continue
-
-        pct_change = ((last_close - prev_close) / prev_close * 100) if prev_close else 0.0
-        threshold_key, name = sym["key"], sym["name"]
-        th_def = protocol.get("thresholds", {}).get(threshold_key, {})
-        mode = "level" if threshold_key == "vix_level" else "pct"
-        measured = last_close if mode == "level" else pct_change
-        title = (f"{name}: {last_close:.2f} ({pct_change:+.2f}% vs seduta prec.)"
-                 if mode != "level" else
-                 f"{name}: {last_close:.2f} (var. giornaliera {pct_change:+.2f}%)")
-        triggered, level = evaluate_threshold(measured, threshold_key, protocol)
-        flags = fetcher_flags(threshold_key, round(measured, 3),
-                               th_def.get("unit", ""), triggered, level,
-                               notes=f"Ultima chiusura: {last_close:.2f}, "
-                                     f"precedente: {prev_close:.2f} (fonte: Yahoo Finance)")
-        events.append({
-            "event_id":       make_event_id(area_id, title, f"{feed['id']}_{ticker}"),
-            "schema_version": SCHEMA_VER,
-            "extracted_at":   now_utc(),
-            "meg_area":       area_id,
-            "meg_area_label": area_label,
-            "source":         {**source_block(feed), "id": f"{feed['id']}_{ticker}"},
-            "content": {
-                "title":        title,
-                "summary":      f"Ultime {len(valid)} sedute disponibili su Yahoo Finance",
-                "original_url": f"https://finance.yahoo.com/quote/{ticker}",
-                "published_at": now_utc(),
-                "language":     "en",
-            },
-            "meg_flags": flags,
-        })
-    return events
-
-
-ALPHAVANTAGE_THROTTLE_FILE = OUTPUT_DIR / ".alphavantage_last_run"
-ALPHAVANTAGE_MIN_HOURS = 3  # 3 simboli x 8 run/giorno = 24 richieste, sotto il limite di 25/giorno
-
-def alphavantage_should_run() -> bool:
-    """Throttling persistente su file — evita di sforare il rate limit
-    gratuito (25 richieste/giorno) quando il workflow gira ogni ora."""
-    if not ALPHAVANTAGE_THROTTLE_FILE.exists():
-        return True
-    try:
-        last = datetime.datetime.fromisoformat(
-            ALPHAVANTAGE_THROTTLE_FILE.read_text().strip())
-    except Exception:
-        return True
-    elapsed_hours = (datetime.datetime.utcnow() - last).total_seconds() / 3600
-    return elapsed_hours >= ALPHAVANTAGE_MIN_HOURS
-
-def alphavantage_mark_run():
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    ALPHAVANTAGE_THROTTLE_FILE.write_text(datetime.datetime.utcnow().isoformat())
-
-
-async def fetch_alphavantage_multi(client: httpx.AsyncClient, feed: dict,
-                                    area_id: str, area_label: str,
-                                    protocol: dict) -> list[dict]:
-    """Fetch S&P 500 (via SPY), oro (via GLD), EUR/USD da Alpha Vantage.
-    Richiede API key gratuita in ALPHAVANTAGE_KEY. Fonte ridondante a
-    Yahoo Finance — se manca la chiave o il throttling blocca il run,
-    si auto-esclude senza generare errore falso."""
-    import os
-
-    api_key = os.environ.get("ALPHAVANTAGE_KEY", "").strip()
-    if not api_key:
-        return []  # nessuna chiave configurata — non è un errore, è opzionale
-
-    if not alphavantage_should_run():
-        return []  # throttling: rispettiamo il budget giornaliero gratuito
-
-    events: list[dict] = []
-    for sym in feed.get("symbols", []):
-        function = sym["function"]
-        params = {"function": function, "apikey": api_key}
-        series_key = None
-        if function == "TIME_SERIES_DAILY":
-            params["symbol"] = sym["symbol"]
-            series_key = "Time Series (Daily)"
-        elif function == "FX_DAILY":
-            params["from_symbol"] = sym["from_symbol"]
-            params["to_symbol"] = sym["to_symbol"]
-            series_key = "Time Series FX (Daily)"
-        else:
-            continue
-
-        source_id = f"{feed['id']}_{sym['key']}"
-        await asyncio.sleep(13)  # rispetta il limite 5 richieste/minuto del piano free
-        try:
-            r = await client.get(feed["url"], params=params, timeout=FETCH_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            series = data.get(series_key)
-            if not series:
-                record_error(source_id, area_id,
-                             data.get("Error Message") or data.get("Note")
-                             or data.get("Information") or "risposta senza serie dati")
-                continue
-            dates_sorted = sorted(series.keys(), reverse=True)
-            if len(dates_sorted) < 2:
-                continue
-            last_close = float(series[dates_sorted[0]]["4. close"])
-            prev_close = float(series[dates_sorted[1]]["4. close"])
-        except Exception as e:
-            record_error(source_id, area_id, e)
-            continue
-
-        pct_change = ((last_close - prev_close) / prev_close * 100) if prev_close else 0.0
-        threshold_key, name = sym["key"], sym["name"]
-        th_def = protocol.get("thresholds", {}).get(threshold_key, {})
-        measured = pct_change
-        title = f"{name}: {last_close:.4f} ({pct_change:+.2f}% vs seduta prec.)"
-        triggered, level = evaluate_threshold(measured, threshold_key, protocol)
-        flags = fetcher_flags(threshold_key, round(measured, 3),
-                               th_def.get("unit", ""), triggered, level,
-                               notes=f"Ultima chiusura: {last_close:.4f} ({dates_sorted[0]}), "
-                                     f"precedente: {prev_close:.4f} ({dates_sorted[1]}) (fonte: Alpha Vantage)")
-        events.append({
-            "event_id":       make_event_id(area_id, title, source_id),
-            "schema_version": SCHEMA_VER,
-            "extracted_at":   now_utc(),
-            "meg_area":       area_id,
-            "meg_area_label": area_label,
-            "source":         {**source_block(feed), "id": source_id},
-            "content": {
-                "title":        title,
-                "summary":      f"Ultime {len(dates_sorted)} sedute disponibili su Alpha Vantage",
-                "original_url": "https://www.alphavantage.co/",
-                "published_at": f"{dates_sorted[0]}T00:00:00Z",
-                "language":     "en",
-            },
-            "meg_flags": flags,
-        })
-
-    if events:
-        alphavantage_mark_run()
-    return events
-
-
-async def fetch_copernicus_ems(client: httpx.AsyncClient, feed: dict,
-                                area_id: str, area_label: str,
-                                protocol: dict) -> list[dict]:
-    """Fetch attivazioni Copernicus EMS dall'API JSON pubblica (l'RSS
-    storico è stato dismesso). Dati più ricchi: paese, categoria,
-    tempo di attivazione, stato aperto/chiuso."""
-    events: list[dict] = []
-    try:
-        r = await client.get(feed["url"], timeout=FETCH_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        record_error(feed.get("id", "?"), area_id, e)
-        return []
-
-    for act in data.get("results", [])[:MAX_ITEMS]:
-        code = act.get("code", "")
-        name = act.get("name", "").strip()
-        if not name:
-            continue
-        countries = ", ".join(act.get("countries", []))
-        category = act.get("category", "")
-        closed = act.get("closed", False)
-        activation_time = act.get("activationTime", "")
-        title = f"{code} — {name}"
-
-        events.append({
-            "event_id":       make_event_id(area_id, title, feed["id"]),
-            "schema_version": SCHEMA_VER,
-            "extracted_at":   now_utc(),
-            "meg_area":       area_id,
-            "meg_area_label": area_label,
-            "source":         source_block(feed),
-            "content": {
-                "title":        title,
-                "summary":      f"Categoria: {category} | Paesi: {countries} | Stato: {'chiusa' if closed else 'attiva'}",
-                "original_url": f"https://mapping.emergency.copernicus.eu/activations/{code}/",
-                "published_at": activation_time or None,
-                "language":     "en",
-            },
-            "meg_flags": pending_flags("Attivazione Copernicus EMS — impatto da valutare"),
-        })
-    return events
-
 
 async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                           area_id: str, area_label: str,
@@ -793,7 +515,7 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                 events.append(ev)
         return events
     except Exception as e:
-        record_error(feed.get("id", "?"), area_id, e)
+        print(f"  [WARN] fetch_rss_feed fallito ({feed.get('id')}): {e}")
         return []
 
 
@@ -810,8 +532,7 @@ async def fetch_usgs(client: httpx.AsyncClient, feed: dict,
             if ev:
                 events.append(ev)
         return events
-    except Exception as e:
-        record_error(feed.get("id","?"), area_id, e)
+    except Exception:
         return []
 
 
@@ -828,8 +549,7 @@ async def fetch_noaa_swpc(client: httpx.AsyncClient, feed: dict,
             if ev:
                 events.append(ev)
         return events
-    except Exception as e:
-        record_error(feed.get("id","?"), area_id, e)
+    except Exception:
         return []
 
 
@@ -846,8 +566,7 @@ async def fetch_nasa_eonet(client: httpx.AsyncClient, feed: dict,
             if ev:
                 events.append(ev)
         return events
-    except Exception as e:
-        record_error(feed.get("id","?"), area_id, e)
+    except Exception:
         return []
 
 
@@ -890,12 +609,6 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
         return await fetch_ingv_events(client, feed, area_id, area_label, protocol)
     elif ftype == "stooq_multi":
         return await fetch_stooq_multi(client, feed, area_id, area_label, protocol)
-    elif ftype == "yahoo_multi":
-        return await fetch_yahoo_finance_multi(client, feed, area_id, area_label, protocol)
-    elif ftype == "alphavantage_multi":
-        return await fetch_alphavantage_multi(client, feed, area_id, area_label, protocol)
-    elif ftype == "copernicus_ems_json":
-        return await fetch_copernicus_ems(client, feed, area_id, area_label, protocol)
     elif ftype == "json":
         if "swpc" in url:
             return await fetch_noaa_swpc(client, feed, area_id, area_label, protocol)
@@ -905,49 +618,6 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
 
 
 # ── MAIN FETCH ORCHESTRATOR ───────────────────────────────────────────────────
-
-def build_protocol_record(protocol: dict) -> dict:
-    """Record di istruzioni auto-contenuto: qualunque AI o umano che apre
-    il JSONL trova qui come interpretare meg_flags, le soglie numeriche, e
-    come costruire un report — senza dipendere da documenti esterni."""
-    macro_areas_summary = {
-        area_id: {
-            "name":      area_def["name"],
-            "mandatory": area_def.get("mandatory", False),
-            "note":      (area_def.get("note") or "").strip() or None,
-        }
-        for area_id, area_def in protocol.get("macro_areas", {}).items()
-    }
-    return {
-        "record_type": "meg_protocol",
-        "protocol_version": protocol.get("protocol", {}).get("version"),
-        "generated_at": now_utc(),
-        "field_semantics": {
-            "filled_by":            "'fetcher' = valore numerico strutturato, valutato deterministicamente. 'pending_reasoning' = testo libero, richiede lettura/interpretazione da parte di un reasoning engine.",
-            "quality_flag":         protocol.get("quality_flags", {}),
-            "alert_level":          {
-                "INATTIVO":    "Nessuna soglia superata.",
-                "WATCHLIST":   "Sotto soglia di monitoraggio ma in avvicinamento (>=70% della soglia).",
-                "ATTIVO":      "Soglia di monitoraggio superata — evento rilevante confermato.",
-                "ALLERTA_MAX": "Soglia di allerta massima superata — priorità assoluta nel report.",
-            },
-            "threshold_triggered":  "true se alert_level è ATTIVO o ALLERTA_MAX.",
-            "tier":                 "1 = fonte istituzionale/primaria obbligatoria. 2 = fonte secondaria, ammessa con segnalazione esplicita.",
-        },
-        "report_construction_rules": [
-            "Includere sempre: ogni evento con alert_level ATTIVO o ALLERTA_MAX, indipendentemente dall'area.",
-            "Includere: eventi pending_reasoning il cui contenuto testuale suggerisce escalation, anche senza soglia numerica — vanno letti e valutati, non scartati automaticamente.",
-            "Scartare/riassumere in una riga sola: eventi INATTIVO privi di rilevanza contestuale (es. sismicità di fondo sotto soglia, comunicati istituzionali di routine).",
-            "Collegare causalmente eventi correlati tra aree diverse quando plausibile (es. B1 geopolitica -> B6 energia -> B7 mercati) invece di elencarli come fatti isolati.",
-            "Se un record source_status riporta status 'error' per una fonte tier 1, questo VA segnalato esplicitamente in apertura di report — non va ignorato silenziosamente.",
-            "Finestra di riferimento raccomandata: rolling 48h dal timestamp extracted_at più recente nel file, salvo diversa richiesta esplicita.",
-            "In caso di dati contrastanti tra fonti, segnalare il conflitto esplicitamente invece di produrne una media o sintesi che lo nasconda.",
-        ],
-        "thresholds": protocol.get("thresholds", {}),
-        "macro_areas": macro_areas_summary,
-        "tier1_sources": protocol.get("tier1_sources", []),
-    }
-
 
 async def fetch_all(area_filter: Optional[str] = None,
                      output_path: Optional[Path] = None) -> dict:
@@ -963,9 +633,6 @@ async def fetch_all(area_filter: Optional[str] = None,
               if area_filter and area_filter in sources else sources)
 
     # Costruisce task paralleli
-    FETCH_ERRORS.clear()
-    feed_lookup = {}  # (area_id, feed_id) -> feed dict (per source_status)
-
     async with httpx.AsyncClient() as client:
         tasks = []
         meta  = []
@@ -975,7 +642,6 @@ async def fetch_all(area_filter: Optional[str] = None,
                 tasks.append(
                     fetch_one_feed(client, feed, area_id, label, protocol))
                 meta.append((area_id, feed["id"]))
-                feed_lookup[(area_id, feed["id"])] = feed
         results = await asyncio.gather(*tasks)
 
     # Appiattisce in lista eventi unica
@@ -997,43 +663,12 @@ async def fetch_all(area_filter: Optional[str] = None,
             if flags.get("filled_by") == "pending_reasoning":
                 stats["pending"] += 1
 
-    # Costruisce source_status per ogni fonte interrogata in questo run
-    error_by_source = {e["source_id"]: e for e in FETCH_ERRORS}
-    source_status = []
-    for (area_id, feed_id), events in zip(meta, results):
-        feed = feed_lookup.get((area_id, feed_id), {})
-        err = error_by_source.get(feed_id)
-        if err:
-            status = "error"
-        elif len(events) == 0:
-            status = "empty"
-        else:
-            status = "ok"
-        source_status.append({
-            "id":              feed_id,
-            "area":            area_id,
-            "label":           feed.get("label"),
-            "tier":            feed.get("tier", 2),
-            "type":            feed.get("type"),
-            "status":          status,
-            "events_returned": len(events),
-            "error":           err["error"] if err else None,
-        })
-
-    # Salva JSONL — record di metadata sempre in testa, poi gli eventi
+    # Salva JSONL
     OUTPUT_DIR.mkdir(exist_ok=True)
     if output_path is None:
         output_path = OUTPUT_DIR / f"meg_events_{ts_file()}.jsonl"
 
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(build_protocol_record(protocol), ensure_ascii=False) + "\n")
-        f.write(json.dumps({
-            "record_type": "source_status",
-            "checked_at":  now_utc(),
-            "sources":     source_status,
-            "failed_count": sum(1 for s in source_status if s["status"] == "error"),
-            "empty_count":  sum(1 for s in source_status if s["status"] == "empty"),
-        }, ensure_ascii=False) + "\n")
         for ev in all_events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 

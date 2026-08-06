@@ -1,0 +1,270 @@
+sources:
+  B1:
+    label: Geopolitica e Conflitti
+    feeds:
+    - id: guardian_world
+      label: The Guardian World
+      url: https://www.theguardian.com/world/rss
+      type: rss
+      tier: 1
+    - id: npr_world
+      label: NPR World News
+      url: https://feeds.npr.org/1004/rss.xml
+      type: rss
+      tier: 1
+    - id: bbc_world
+      label: BBC World
+      url: http://feeds.bbci.co.uk/news/world/rss.xml
+      type: rss
+      tier: 1
+    - id: aljazeera
+      label: Al Jazeera
+      url: https://www.aljazeera.com/xml/rss/all.xml
+      type: rss
+      tier: 1
+    - id: ansa_mondo
+      label: ANSA Mondo
+      url: https://www.ansa.it/sito/notizie/mondo/mondo_rss.xml
+      type: rss
+      tier: 2
+    - id: france24_en
+      label: France 24 EN
+      url: https://www.france24.com/en/rss
+      type: rss
+      tier: 2
+    - id: dw_world
+      label: DW World
+      url: https://rss.dw.com/rdf/rss-en-world
+      type: rss
+      tier: 2
+  B2_1_2:
+    label: Sismologia e Vulcanologia
+    feeds:
+    - id: usgs_m25_day
+      label: USGS M2.5+ 24h
+      url: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson
+      type: geojson
+      tier: 1
+    - id: usgs_significant
+      label: USGS Significant
+      url: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.geojson
+      type: geojson
+      tier: 1
+    - id: ingv_rss
+      label: INGV Sismico
+      url: http://cnt.rm.ingv.it/feed/atom/2.5/week
+      type: rss
+      tier: 1
+    - id: ptwc_tsunami
+      label: PTWC Tsunami
+      url: https://ptwc.weather.gov/ptwc/ptwc.php?region=atlantic
+      type: rss
+      tier: 1
+    - id: gdacs
+      label: GDACS Alerts
+      url: https://www.gdacs.org/xml/rss.xml
+      type: rss
+      tier: 1
+  B2_3:
+    label: Idrogeologia
+    feeds:
+    - id: copernicus_ems
+      label: Copernicus EMS
+      url: https://emergency.copernicus.eu/mapping/list-of-activations-rapid/rss
+      type: rss
+      tier: 1
+    - id: reliefweb_geo
+      label: ReliefWeb Geo
+      url: https://reliefweb.int/updates/rss.xml?theme=4591
+      type: rss
+      tier: 2
+    - id: nasa_earthdata
+      label: NASA EONET Events
+      url: https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=20
+      type: json
+      tier: 1
+      json_path: events
+      label_field: title
+      date_field: geometry[0].date
+  B3:
+    label: Meteorologia Estrema e Spazio
+    feeds:
+    - id: noaa_swpc_alerts
+      label: NOAA SWPC Alerts
+      url: https://services.swpc.noaa.gov/products/alerts.json
+      type: json
+      tier: 1
+      json_path: ''
+      label_field: message
+      date_field: issue_datetime
+    - id: nhc_atlantic
+      label: NHC Atlantic
+      url: https://www.nhc.noaa.gov/nhc_at1.xml
+      type: rss
+      tier: 1
+    - id: nhc_pacific
+      label: NHC Pacific
+      url: https://www.nhc.noaa.gov/nhc_ep1.xml
+      type: rss
+      tier: 1
+    - id: wmo_news
+      label: WMO News
+      url: https://public.wmo.int/en/rss/news
+      type: rss
+      tier: 2
+    - id: esa_space
+      label: ESA Space News
+      url: https://www.esa.int/rssfeed/Our_Activities/Space_Safety
+      type: rss
+      tier: 2
+  B4_1:
+    label: Sicurezza Alimentare e Migrazioni
+    feeds:
+    - id: fao_news
+      label: FAO News
+      url: https://www.fao.org/news/rss-news-archive/rss-detail/en/
+      type: rss
+      tier: 1
+    - id: wfp_news
+      label: WFP News
+      url: https://www.wfp.org/news/rss
+      type: rss
+      tier: 1
+    - id: unhcr_news
+      label: UNHCR News
+      url: https://www.unhcr.org/rss.xml
+      type: rss
+      tier: 1
+    - id: ipc_alerts
+      label: IPC Food Security
+      url: https://www.ipcinfo.org/ipcinfo-website/news-archive/news/en/rss
+      type: rss
+      tier: 1
+  B4_2:
+    label: Idrologia Civile Globale
+    feeds:
+    - id: jrc_mars
+      label: JRC MARS
+      url: https://joint-research-centre.ec.europa.eu/jrc-news-and-updates/rss_en
+      type: rss
+      tier: 1
+    - id: reliefweb_drought
+      label: ReliefWeb Drought
+      url: https://reliefweb.int/updates/rss.xml?theme=4601
+      type: rss
+      tier: 2
+    - id: anbi_news
+      label: ANBI Osservatorio
+      url: https://www.anbi.it/notizie/feed
+      type: rss
+      tier: 2
+  B4_3:
+    label: Idrologia Locale Campania
+    feeds:
+    - id: abdam_news
+      label: ABDAM Notizie
+      url: https://www.distrettoappenninomeridionale.it/feed
+      type: rss
+      tier: 1
+    - id: altocalore
+      label: Alto Calore Servizi
+      url: https://www.altocalore.it/feed
+      type: rss
+      tier: 1
+    - id: ansa_campania
+      label: ANSA Campania
+      url: https://www.ansa.it/campania/notizie/campania_rss.xml
+      type: rss
+      tier: 2
+  B5:
+    label: Tecnologia, AI e Biosicurezza
+    feeds:
+    - id: who_disease
+      label: WHO Disease Outbreaks
+      url: https://www.who.int/feeds/entity/csr/don/en/rss.xml
+      type: rss
+      tier: 1
+    - id: iaea_news
+      label: IAEA News
+      url: https://www.iaea.org/feeds/topstories.rss
+      type: rss
+      tier: 1
+    - id: ecdc_threats
+      label: ECDC Threats
+      url: https://www.ecdc.europa.eu/en/rss-feeds/threats-and-outbreaks
+      type: rss
+      tier: 1
+    - id: krebs_cyber
+      label: KrebsOnSecurity
+      url: https://krebsonsecurity.com/feed/
+      type: rss
+      tier: 2
+  B7:
+    label: Economia e Mercati Globali
+    feeds:
+    # -- Strutturate: valore numerico deterministico, filled_by="fetcher" --
+    - id: stooq_snapshot
+      label: Stooq Indici/Valute/Oro (storico 10gg)
+      url: https://stooq.com/q/d/l/
+      type: stooq_multi
+      tier: 1
+      symbols: ["^spx", "^vix", "^dax", "xauusd", "eurusd"]
+    # -- Istituzionali testuali: filled_by="pending_reasoning" --
+    - id: ecb_press
+      label: ECB Press Releases
+      url: https://www.ecb.europa.eu/rss/press.html
+      type: rss
+      tier: 1
+    - id: fed_press
+      label: Federal Reserve Press Releases
+      url: https://www.federalreserve.gov/feeds/press_all.xml
+      type: rss
+      tier: 1
+    - id: imf_news
+      label: IMF News
+      url: https://www.imf.org/en/News/rss
+      type: rss
+      tier: 1
+    - id: marketwatch_top
+      label: MarketWatch Top Stories
+      url: https://www.marketwatch.com/rss/topstories
+      type: rss
+      tier: 2
+    - id: google_econ_it
+      label: Google News Crisi Economica/Finanziaria (IT)
+      url: https://news.google.com/rss/search?q=crisi+economica+finanziaria+quando:1d&hl=it&gl=IT&ceid=IT:it
+      type: rss
+      tier: 2
+    - id: google_econ_en
+      label: Google News Market Crash/Recession Signal (EN)
+      url: https://news.google.com/rss/search?q=market+crash+recession+signal+when:1d&hl=en&gl=US&ceid=US:en
+      type: rss
+      tier: 2
+  B6:
+    label: Sicurezza Energetica
+    feeds:
+    - id: eia_energy
+      label: US EIA Today in Energy
+      url: https://www.eia.gov/rss/todayinenergy.xml
+      type: rss
+      tier: 1
+    - id: google_energy
+      label: Google News Energia
+      url: https://news.google.com/rss/search?q=oil+gas+energy+crisis&hl=en&gl=US&ceid=US:en
+      type: rss
+      tier: 1
+    - id: qualenergia
+      label: QualEnergia.it
+      url: https://www.qualenergia.it/feed/
+      type: rss
+      tier: 2
+    - id: rigzone
+      label: Rigzone Oil & Gas
+      url: https://www.rigzone.com/news/rss/rigzone_latest.aspx
+      type: rss
+      tier: 2
+    - id: gse_it
+      label: GSE Gestore Servizi Energetici
+      url: https://www.gse.it/feed
+      type: rss
+      tier: 2

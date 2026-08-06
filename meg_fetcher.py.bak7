@@ -735,51 +735,6 @@ async def fetch_alphavantage_multi(client: httpx.AsyncClient, feed: dict,
     return events
 
 
-async def fetch_copernicus_ems(client: httpx.AsyncClient, feed: dict,
-                                area_id: str, area_label: str,
-                                protocol: dict) -> list[dict]:
-    """Fetch attivazioni Copernicus EMS dall'API JSON pubblica (l'RSS
-    storico è stato dismesso). Dati più ricchi: paese, categoria,
-    tempo di attivazione, stato aperto/chiuso."""
-    events: list[dict] = []
-    try:
-        r = await client.get(feed["url"], timeout=FETCH_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        record_error(feed.get("id", "?"), area_id, e)
-        return []
-
-    for act in data.get("results", [])[:MAX_ITEMS]:
-        code = act.get("code", "")
-        name = act.get("name", "").strip()
-        if not name:
-            continue
-        countries = ", ".join(act.get("countries", []))
-        category = act.get("category", "")
-        closed = act.get("closed", False)
-        activation_time = act.get("activationTime", "")
-        title = f"{code} — {name}"
-
-        events.append({
-            "event_id":       make_event_id(area_id, title, feed["id"]),
-            "schema_version": SCHEMA_VER,
-            "extracted_at":   now_utc(),
-            "meg_area":       area_id,
-            "meg_area_label": area_label,
-            "source":         source_block(feed),
-            "content": {
-                "title":        title,
-                "summary":      f"Categoria: {category} | Paesi: {countries} | Stato: {'chiusa' if closed else 'attiva'}",
-                "original_url": f"https://mapping.emergency.copernicus.eu/activations/{code}/",
-                "published_at": activation_time or None,
-                "language":     "en",
-            },
-            "meg_flags": pending_flags("Attivazione Copernicus EMS — impatto da valutare"),
-        })
-    return events
-
-
 async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                           area_id: str, area_label: str,
                           protocol: dict) -> list[dict]:
@@ -894,8 +849,6 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
         return await fetch_yahoo_finance_multi(client, feed, area_id, area_label, protocol)
     elif ftype == "alphavantage_multi":
         return await fetch_alphavantage_multi(client, feed, area_id, area_label, protocol)
-    elif ftype == "copernicus_ems_json":
-        return await fetch_copernicus_ems(client, feed, area_id, area_label, protocol)
     elif ftype == "json":
         if "swpc" in url:
             return await fetch_noaa_swpc(client, feed, area_id, area_label, protocol)
