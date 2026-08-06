@@ -70,9 +70,9 @@ sources:
     label: Idrogeologia
     feeds:
     - id: copernicus_ems
-      label: Copernicus EMS
-      url: https://emergency.copernicus.eu/mapping/list-of-activations-rapid/rss
-      type: rss
+      label: Copernicus EMS (API JSON)
+      url: "https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations-info/?limit=15"
+      type: copernicus_ems_json
       tier: 1
     - id: reliefweb_geo
       label: ReliefWeb Geo
@@ -132,13 +132,13 @@ sources:
       type: rss
       tier: 1
     - id: unhcr_news
-      label: UNHCR News
-      url: https://www.unhcr.org/rss.xml
+      label: UNHCR News (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S2868%29"
       type: rss
       tier: 1
     - id: ipc_alerts
-      label: IPC Food Security
-      url: https://www.ipcinfo.org/ipcinfo-website/news-archive/news/en/rss
+      label: IPC Food Security (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S3495%29"
       type: rss
       tier: 1
   B4_2:
@@ -181,18 +181,18 @@ sources:
     label: Tecnologia, AI e Biosicurezza
     feeds:
     - id: who_disease
-      label: WHO Disease Outbreaks
-      url: https://www.who.int/feeds/entity/csr/don/en/rss.xml
+      label: WHO Disease Outbreaks (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1275%29"
       type: rss
       tier: 1
     - id: iaea_news
-      label: IAEA News
-      url: https://www.iaea.org/feeds/topstories.rss
+      label: IAEA News (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1002%29"
       type: rss
       tier: 1
     - id: ecdc_threats
-      label: ECDC Threats
-      url: https://www.ecdc.europa.eu/en/rss-feeds/threats-and-outbreaks
+      label: ECDC Threats (Communicable Disease Threats Report)
+      url: https://www.ecdc.europa.eu/en/taxonomy/term/1505/feed
       type: rss
       tier: 1
     - id: krebs_cyber
