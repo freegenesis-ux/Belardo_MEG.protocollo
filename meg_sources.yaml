@@ -109,8 +109,8 @@ sources:
       type: rss
       tier: 1
     - id: wmo_news
-      label: WMO News
-      url: https://public.wmo.int/en/rss/news
+      label: WMO News (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1205%29"
       type: rss
       tier: 2
     - id: esa_space
