@@ -69,6 +69,12 @@ def record_error(source_id: str, area_id: str, msg: str):
     print(f"  [WARN] fonte fallita ({source_id}, area {area_id}): {msg}")
 
 
+# ReliefWeb applica rate-limit su richieste simultanee dallo stesso IP —
+# questo semaforo serializza solo le chiamate verso reliefweb.int, senza
+# rallentare la concorrenza delle altre fonti (che non hanno il problema).
+RELIEFWEB_SEMAPHORE = asyncio.Semaphore(1)
+
+
 async def fetch_with_retry(client: httpx.AsyncClient, url: str,
                             timeout: float = FETCH_TIMEOUT, attempts: int = 2):
     """GET con retry e rotazione User-Agent. Solleva l'ultima eccezione se
@@ -783,8 +789,14 @@ async def fetch_copernicus_ems(client: httpx.AsyncClient, feed: dict,
 async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                           area_id: str, area_label: str,
                           protocol: dict) -> list[dict]:
+    is_reliefweb = "reliefweb.int" in feed.get("url", "")
     try:
-        r = await fetch_with_retry(client, feed["url"])
+        if is_reliefweb:
+            async with RELIEFWEB_SEMAPHORE:
+                r = await fetch_with_retry(client, feed["url"])
+                await asyncio.sleep(1.5)  # margine di cortesia tra una richiesta e la successiva
+        else:
+            r = await fetch_with_retry(client, feed["url"])
         parsed = feedparser.parse(r.text)
         events = []
         for entry in parsed.entries[:MAX_ITEMS]:
