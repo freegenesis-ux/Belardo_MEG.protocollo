@@ -242,8 +242,8 @@ sources:
       type: rss
       tier: 1
     - id: imf_news
-      label: IMF News
-      url: https://www.imf.org/en/News/rss
+      label: IMF News (via ReliefWeb)
+      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1169%29"
       type: rss
       tier: 1
     - id: marketwatch_top
