@@ -57,8 +57,8 @@ sources:
       tier: 1
       minmag: 1.5
     - id: ptwc_tsunami
-      label: PTWC Tsunami
-      url: https://ptwc.weather.gov/ptwc/ptwc.php?region=atlantic
+      label: NWS Tsunami Warning Center (Atom)
+      url: https://www.tsunami.gov/events/xml/PAAQAtom.xml
       type: rss
       tier: 1
     - id: gdacs
@@ -145,8 +145,8 @@ sources:
     label: Idrologia Civile Globale
     feeds:
     - id: jrc_mars
-      label: JRC MARS
-      url: https://joint-research-centre.ec.europa.eu/jrc-news-and-updates/rss_en
+      label: JRC Publications Repository (RSS)
+      url: https://publications.jrc.ec.europa.eu/repository/feed/rss_2.0/site
       type: rss
       tier: 1
     - id: reliefweb_drought
