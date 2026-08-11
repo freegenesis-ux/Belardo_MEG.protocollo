@@ -794,10 +794,17 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
         if is_reliefweb:
             async with RELIEFWEB_SEMAPHORE:
                 r = await fetch_with_retry(client, feed["url"])
-                await asyncio.sleep(1.5)  # margine di cortesia tra una richiesta e la successiva
+                await asyncio.sleep(1.5)
+                parsed = feedparser.parse(r.text)
+                if len(parsed.entries) == 0:
+                    # rate-limit condiviso sui runner GitHub (IP pool) — un retry
+                    # dopo pausa più lunga spesso basta a superarlo
+                    await asyncio.sleep(5)
+                    r = await fetch_with_retry(client, feed["url"])
+                    parsed = feedparser.parse(r.text)
         else:
             r = await fetch_with_retry(client, feed["url"])
-        parsed = feedparser.parse(r.text)
+            parsed = feedparser.parse(r.text)
         events = []
         for entry in parsed.entries[:MAX_ITEMS]:
             ev = normalize_rss_item(entry, feed, area_id, area_label)
