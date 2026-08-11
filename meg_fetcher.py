@@ -796,10 +796,14 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                 r = await fetch_with_retry(client, feed["url"])
                 await asyncio.sleep(1.5)
                 parsed = feedparser.parse(r.text)
-                if len(parsed.entries) == 0:
-                    # rate-limit condiviso sui runner GitHub (IP pool) — un retry
-                    # dopo pausa più lunga spesso basta a superarlo
-                    await asyncio.sleep(5)
+                # rate-limit condiviso sui runner GitHub (IP pool) — retry multipli
+                # con backoff crescente, utile nei picchi di traffico globale
+                # (es. molti sistemi che interrogano le stesse fonti durante
+                # un evento maggiore in corso)
+                attempt = 0
+                while len(parsed.entries) == 0 and attempt < 3:
+                    attempt += 1
+                    await asyncio.sleep(5 * attempt)
                     r = await fetch_with_retry(client, feed["url"])
                     parsed = feedparser.parse(r.text)
         else:
