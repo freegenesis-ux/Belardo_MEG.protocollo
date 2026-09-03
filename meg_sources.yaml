@@ -87,6 +87,11 @@ sources:
       json_path: events
       label_field: title
       date_field: geometry[0].date
+    - id: protezionecivile_criticita
+      label: Protezione Civile - Bollettino di Criticita
+      url: https://api.protezionecivile.it/default/dpcPortalGenerateRss?categoria=bollettino_criticita
+      type: rss
+      tier: 1
   B3:
     label: Meteorologia Estrema e Spazio
     feeds:
@@ -154,11 +159,11 @@ sources:
       url: https://reliefweb.int/updates/rss.xml?theme=4601
       type: rss
       tier: 2
-    - id: anbi_news
-      label: ANBI Osservatorio
-      url: https://www.anbi.it/notizie/feed
+    - id: ispra_notizie
+      label: ISPRA Notizie
+      url: https://www.isprambiente.gov.it/it/news/notizie/RSS
       type: rss
-      tier: 2
+      tier: 1
   B4_3:
     label: Idrologia Locale Campania
     feeds:
@@ -282,10 +287,5 @@ sources:
     - id: rigzone
       label: Rigzone Oil & Gas
       url: https://www.rigzone.com/news/rss/rigzone_latest.aspx
-      type: rss
-      tier: 2
-    - id: gse_it
-      label: GSE Gestore Servizi Energetici
-      url: https://www.gse.it/feed
       type: rss
       tier: 2
