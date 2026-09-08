@@ -318,10 +318,3 @@ generalist_sources:
     url: https://www.marketwatch.com/rss/topstories
     type: rss
     tier: 2
-
-generalist_sources:
-  - id: aljazeera_ai
-    label: Al Jazeera (smistato da AI)
-    url: https://www.aljazeera.com/xml/rss/all.xml
-    type: rss
-    tier: 2
