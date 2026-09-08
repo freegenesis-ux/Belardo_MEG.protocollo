@@ -27,6 +27,7 @@ import hashlib
 import json
 import argparse
 import datetime
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +42,14 @@ OUTPUT_DIR    = BASE / "meg_events"
 FETCH_TIMEOUT = 14
 MAX_ITEMS     = 10
 SCHEMA_VER    = "1.0"
+
+# Classificatore AI per fonti generaliste (Groq, free tier).
+# Se la chiave non è impostata, le fonti "generalist_sources" vengono
+# semplicemente saltate (nessun fallback silenzioso che finge dati).
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY")
+GROQ_MODEL    = "openai/gpt-oss-20b"
+GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions"
+AI_BATCH_SIZE = 20
 
 # Rotazione User-Agent + retry — stessa logica di resilienza del Pannello CV
 # (dove un singolo proxy CORS instabile veniva scavalcato con una catena di
@@ -76,9 +85,11 @@ RELIEFWEB_SEMAPHORE = asyncio.Semaphore(1)
 
 
 async def fetch_with_retry(client: httpx.AsyncClient, url: str,
-                            timeout: float = FETCH_TIMEOUT, attempts: int = 2):
+                            timeout: float = FETCH_TIMEOUT, attempts: int = 4):
     """GET con retry e rotazione User-Agent. Solleva l'ultima eccezione se
-    tutti i tentativi falliscono — il chiamante decide come gestirla."""
+    tutti i tentativi falliscono — il chiamante decide come gestirla.
+    Backoff più lungo (1.5s, 3s, 4.5s...) per assorbire risoluzioni DNS
+    lente/intermittenti, non solo errori HTTP transitori."""
     last_exc = None
     for i in range(attempts):
         try:
@@ -89,7 +100,7 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str,
             return r
         except Exception as e:
             last_exc = e
-            await asyncio.sleep(0.4 * (i + 1))
+            await asyncio.sleep(1.5 * (i + 1))
     raise last_exc
 
 
@@ -98,6 +109,10 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str,
 def load_sources() -> dict:
     with open(SOURCES_PATH, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)["sources"]
+
+def load_generalist_sources() -> list:
+    with open(SOURCES_PATH, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f).get("generalist_sources", [])
 
 def load_protocol() -> dict:
     if not PROTOCOL_PATH.exists():
@@ -810,7 +825,16 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
             r = await fetch_with_retry(client, feed["url"])
             parsed = feedparser.parse(r.text)
         events = []
-        for entry in parsed.entries[:MAX_ITEMS]:
+        entries = parsed.entries
+        keywords = feed.get("keywords")
+        if keywords:
+            kw_lower = [k.lower() for k in keywords]
+            def _matches_keywords(e):
+                text = ((getattr(e, "title", "") or "") + " " +
+                        (getattr(e, "summary", "") or "")).lower()
+                return any(k in text for k in kw_lower)
+            entries = [e for e in entries if _matches_keywords(e)]
+        for entry in entries[:MAX_ITEMS]:
             ev = normalize_rss_item(entry, feed, area_id, area_label)
             if ev:
                 events.append(ev)
@@ -818,6 +842,126 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
     except Exception as e:
         record_error(feed.get("id", "?"), area_id, e)
         return []
+
+
+async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
+                              valid_areas: dict[str, str]) -> dict[int, Optional[str]]:
+    """
+    Chiede a Groq di assegnare ogni item (indice -> {title, summary}) a una
+    delle aree MEG valide, o None se non pertinente a nessuna (scarta).
+    Ritorna {} in caso di qualunque errore/timeout: nessun fallback che
+    inventa un'area — se l'AI non risponde, quegli item vengono saltati,
+    non forzati in un'area a caso.
+    """
+    if not GROQ_API_KEY:
+        return {}
+
+    area_list_txt = "\n".join(f"- {aid}: {name}" for aid, name in valid_areas.items())
+    items_txt = "\n".join(
+        f"{i}. {it['title']} — {(it.get('summary') or '')[:200]}"
+        for i, it in enumerate(items)
+    )
+    prompt = (
+        "Sei un classificatore. Per ciascun articolo numerato sotto, assegna "
+        "l'ID dell'area MEG più pertinente dalla lista, oppure null se "
+        "l'articolo non riguarda nessuna di queste aree (es. sport, gossip, "
+        "cronaca locale non pertinente).\n\n"
+        f"Aree valide:\n{area_list_txt}\n\n"
+        f"Articoli:\n{items_txt}\n\n"
+        "Rispondi SOLO con un JSON valido, senza testo aggiuntivo, nella forma: "
+        '{"0": "B4_1", "1": null, "2": "B3", ...} con una chiave per ogni indice.'
+    )
+
+    try:
+        r = await client.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+                "max_completion_tokens": 4096,
+                "reasoning_effort": "low",
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        raw = json.loads(content)
+        out: dict[int, Optional[str]] = {}
+        for k, v in raw.items():
+            idx = int(k)
+            out[idx] = v if v in valid_areas else None
+        return out
+    except Exception:
+        return {}
+
+
+async def fetch_generalist_source(client: httpx.AsyncClient, feed: dict,
+                                   protocol: dict) -> tuple[list[dict], str]:
+    """
+    Fetcha una fonte generalista (non ancorata a una singola area) e usa
+    l'AI per smistare ogni item nell'area MEG corretta, o scartarlo.
+    Ritorna (eventi, status) dove status è uno tra:
+      ok | empty | error | ai_unavailable
+    """
+    valid_areas = {
+        aid: a.get("name", aid)
+        for aid, a in protocol.get("macro_areas", {}).items()
+    }
+    try:
+        r = await fetch_with_retry(client, feed["url"])
+        parsed = feedparser.parse(r.text)
+    except Exception as e:
+        record_error(feed.get("id", "?"), "generalist", e)
+        return [], "error"
+
+    entries = parsed.entries
+    keywords = feed.get("keywords")
+    if keywords:
+        kw_lower = [k.lower() for k in keywords]
+        entries = [
+            e for e in entries
+            if any(k in ((getattr(e, "title", "") or "") + " " +
+                          (getattr(e, "summary", "") or "")).lower()
+                   for k in kw_lower)
+        ]
+    entries = entries[:MAX_ITEMS * 3]
+
+    if not entries:
+        return [], "empty"
+
+    if not GROQ_API_KEY:
+        return [], "ai_unavailable"
+
+    items = [{
+        "title": getattr(e, "title", "") or "",
+        "summary": getattr(e, "summary", "") or "",
+    } for e in entries]
+
+    assignments: dict[int, Optional[str]] = {}
+    for start in range(0, len(items), AI_BATCH_SIZE):
+        batch = items[start:start + AI_BATCH_SIZE]
+        result = await classify_titles_ai(client, batch, valid_areas)
+        for local_idx, area in result.items():
+            assignments[start + local_idx] = area
+
+    if not assignments:
+        return [], "ai_unavailable"
+
+    events = []
+    for i, entry in enumerate(entries):
+        area_id = assignments.get(i)
+        if not area_id:
+            continue
+        area_label = valid_areas.get(area_id, area_id)
+        ev = normalize_rss_item(entry, feed, area_id, area_label)
+        if ev:
+            ev["meg_flags"]["quality_flag"] = "CLASSIFICATO_AI"
+            events.append(ev)
+
+    return events, ("ok" if events else "empty")
 
 
 async def fetch_usgs(client: httpx.AsyncClient, feed: dict,
@@ -980,6 +1124,7 @@ async def fetch_all(area_filter: Optional[str] = None,
     """
     sources  = load_sources()
     protocol = load_protocol()
+    generalist_sources = load_generalist_sources()
 
     # Filtra per area se richiesto
     target = ({area_filter: sources[area_filter]}
@@ -1001,6 +1146,12 @@ async def fetch_all(area_filter: Optional[str] = None,
                 feed_lookup[(area_id, feed["id"])] = feed
         results = await asyncio.gather(*tasks)
 
+        generalist_tasks = [
+            fetch_generalist_source(client, feed, protocol)
+            for feed in generalist_sources
+        ]
+        generalist_results = await asyncio.gather(*generalist_tasks) if generalist_tasks else []
+
     # Appiattisce in lista eventi unica
     all_events: list[dict] = []
     stats = {"total": 0, "by_area": {}, "triggered": 0, "pending": 0}
@@ -1014,6 +1165,22 @@ async def fetch_all(area_filter: Optional[str] = None,
             stats["total"] += 1
             stats["by_area"].setdefault(area_id, 0)
             stats["by_area"][area_id] += 1
+            flags = ev.get("meg_flags", {})
+            if flags.get("threshold_triggered"):
+                stats["triggered"] += 1
+            if flags.get("filled_by") == "pending_reasoning":
+                stats["pending"] += 1
+
+    for feed, (events, gen_status) in zip(generalist_sources, generalist_results):
+        for ev in events:
+            if area_filter and ev["meg_area"] != area_filter:
+                continue
+            if any(e["event_id"] == ev["event_id"] for e in all_events):
+                continue
+            all_events.append(ev)
+            stats["total"] += 1
+            stats["by_area"].setdefault(ev["meg_area"], 0)
+            stats["by_area"][ev["meg_area"]] += 1
             flags = ev.get("meg_flags", {})
             if flags.get("threshold_triggered"):
                 stats["triggered"] += 1
@@ -1041,6 +1208,18 @@ async def fetch_all(area_filter: Optional[str] = None,
             "status":          status,
             "events_returned": len(events),
             "error":           err["error"] if err else None,
+        })
+
+    for feed, (events, gen_status) in zip(generalist_sources, generalist_results):
+        source_status.append({
+            "id":              feed["id"],
+            "area":            "generalist (smistato da AI)",
+            "label":           feed.get("label"),
+            "tier":            feed.get("tier", 2),
+            "type":            feed.get("type"),
+            "status":          gen_status,
+            "events_returned": len(events),
+            "error":           None,
         })
 
     # Salva JSONL — record di metadata sempre in testa, poi gli eventi

@@ -127,8 +127,8 @@ sources:
     label: Sicurezza Alimentare e Migrazioni
     feeds:
     - id: fao_news
-      label: FAO News (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S2836%29"
+      label: FAO Newsroom (diretto)
+      url: "https://www.fao.org/feeds/fao-newsroom-rss"
       type: rss
       tier: 1
     - id: wfp_news
@@ -146,6 +146,28 @@ sources:
       url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S3495%29"
       type: rss
       tier: 1
+    - id: aljazeera_humanitarian
+      label: Al Jazeera (filtrato food/migrazioni)
+      url: https://www.aljazeera.com/xml/rss/all.xml
+      type: rss
+      tier: 2
+      keywords:
+        - famine
+        - food security
+        - food crisis
+        - hunger
+        - malnutrition
+        - drought
+        - refugee
+        - refugees
+        - displaced
+        - displacement
+        - migrant
+        - migrants
+        - asylum
+        - humanitarian crisis
+        - aid agency
+        - starvation
   B4_2:
     label: Idrologia Civile Globale
     feeds:
@@ -191,8 +213,8 @@ sources:
       type: rss
       tier: 1
     - id: iaea_news
-      label: IAEA News (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1002%29"
+      label: IAEA Top News (diretto)
+      url: "https://www.iaea.org/feeds/topnews"
       type: rss
       tier: 1
     - id: ecdc_threats
@@ -289,3 +311,17 @@ sources:
       url: https://www.rigzone.com/news/rss/rigzone_latest.aspx
       type: rss
       tier: 2
+
+generalist_sources:
+  - id: aljazeera_ai
+    label: Al Jazeera (smistato da AI)
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    type: rss
+    tier: 2
+
+generalist_sources:
+  - id: aljazeera_ai
+    label: Al Jazeera (smistato da AI)
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    type: rss
+    tier: 2
