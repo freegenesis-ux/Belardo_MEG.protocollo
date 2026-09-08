@@ -61,11 +61,6 @@ sources:
       url: https://www.tsunami.gov/events/xml/PAAQAtom.xml
       type: rss
       tier: 1
-    - id: gdacs
-      label: GDACS Alerts
-      url: https://www.gdacs.org/xml/rss.xml
-      type: rss
-      tier: 1
   B2_3:
     label: Idrogeologia
     feeds:
@@ -181,11 +176,6 @@ sources:
       url: https://reliefweb.int/updates/rss.xml?theme=4601
       type: rss
       tier: 2
-    - id: ispra_notizie
-      label: ISPRA Notizie
-      url: https://www.isprambiente.gov.it/it/news/notizie/RSS
-      type: rss
-      tier: 1
   B4_3:
     label: Idrologia Locale Campania
     feeds:
@@ -199,11 +189,6 @@ sources:
       url: https://www.altocalore.it/feed
       type: rss
       tier: 1
-    - id: ansa_campania
-      label: ANSA Campania
-      url: https://www.ansa.it/campania/notizie/campania_rss.xml
-      type: rss
-      tier: 2
   B5:
     label: Tecnologia, AI e Biosicurezza
     feeds:
@@ -273,11 +258,6 @@ sources:
       url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1169%29"
       type: rss
       tier: 1
-    - id: marketwatch_top
-      label: MarketWatch Top Stories
-      url: https://www.marketwatch.com/rss/topstories
-      type: rss
-      tier: 2
     - id: google_econ_it
       label: Google News Crisi Economica/Finanziaria (IT)
       url: https://news.google.com/rss/search?q=crisi+economica+finanziaria+quando:1d&hl=it&gl=IT&ceid=IT:it
@@ -316,6 +296,26 @@ generalist_sources:
   - id: aljazeera_ai
     label: Al Jazeera (smistato da AI)
     url: https://www.aljazeera.com/xml/rss/all.xml
+    type: rss
+    tier: 2
+  - id: gdacs_ai
+    label: GDACS Alerts (smistato da AI)
+    url: https://www.gdacs.org/xml/rss.xml
+    type: rss
+    tier: 1
+  - id: ispra_ai
+    label: ISPRA Notizie (smistato da AI)
+    url: https://www.isprambiente.gov.it/it/news/notizie/RSS
+    type: rss
+    tier: 1
+  - id: ansa_campania_ai
+    label: ANSA Campania (smistato da AI)
+    url: https://www.ansa.it/campania/notizie/campania_rss.xml
+    type: rss
+    tier: 2
+  - id: marketwatch_ai
+    label: MarketWatch Top Stories (smistato da AI)
+    url: https://www.marketwatch.com/rss/topstories
     type: rss
     tier: 2
 
