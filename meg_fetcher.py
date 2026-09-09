@@ -83,6 +83,11 @@ def record_error(source_id: str, area_id: str, msg: str):
 # rallentare la concorrenza delle altre fonti (che non hanno il problema).
 RELIEFWEB_SEMAPHORE = asyncio.Semaphore(1)
 
+# Groq (free tier) applica un limite di richieste/minuto — con più fonti
+# generaliste in parallelo si superava il limite (429). Serializziamo le
+# chiamate e ritentiamo con backoff specificamente sui 429.
+GROQ_SEMAPHORE = asyncio.Semaphore(1)
+
 
 async def fetch_with_retry(client: httpx.AsyncClient, url: str,
                             timeout: float = FETCH_TIMEOUT, attempts: int = 4):
@@ -873,20 +878,32 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
     )
 
     try:
-        r = await client.post(
-            GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": GROQ_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0,
-                "response_format": {"type": "json_object"},
-                "max_completion_tokens": 4096,
-                "reasoning_effort": "low",
-            },
-            timeout=40,
-        )
-        r.raise_for_status()
+        async with GROQ_SEMAPHORE:
+            for attempt in range(3):
+                try:
+                    r = await client.post(
+                        GROQ_URL,
+                        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                        json={
+                            "model": GROQ_MODEL,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0,
+                            "response_format": {"type": "json_object"},
+                            "max_completion_tokens": 4096,
+                            "reasoning_effort": "low",
+                        },
+                        timeout=40,
+                    )
+                    if r.status_code == 429 and attempt < 2:
+                        await asyncio.sleep(5 * (attempt + 1))
+                        continue
+                    r.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429 and attempt < 2:
+                        await asyncio.sleep(5 * (attempt + 1))
+                        continue
+                    raise
         content = r.json()["choices"][0]["message"]["content"]
         raw = json.loads(content)
         out: dict[int, Optional[str]] = {}
