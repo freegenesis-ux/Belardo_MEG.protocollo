@@ -894,7 +894,8 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
             idx = int(k)
             out[idx] = v if v in valid_areas else None
         return out
-    except Exception:
+    except Exception as e:
+        record_error("classify_titles_ai", "generalist", e)
         return {}
 
 
