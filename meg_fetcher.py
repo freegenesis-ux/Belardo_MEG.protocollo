@@ -884,7 +884,7 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
                 "max_completion_tokens": 4096,
                 "reasoning_effort": "low",
             },
-            timeout=20,
+            timeout=40,
         )
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
