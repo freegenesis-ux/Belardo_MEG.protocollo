@@ -250,6 +250,14 @@ macro_areas:
     institutional_sources:
       - { name: "ABDAM Osservatorio", url: "https://www.distrettoappenninomeridionale.it/novita/osservatorio-permanente-sugli-utilizzi-idrici" }
       - { name: "AQP Sorgenti", url: "https://www.aqp.it/scopri-acquedotto/gli-impianti/sorgenti" }
+    note: >
+      La fonte abdam_news (feed RSS dell'Autorita di Bacino) risponde regolarmente
+      (HTTP 200, lastBuildDate aggiornato in tempo reale) ma restituisce spesso zero
+      item: e SILENZIO INFORMATIVO LEGITTIMO, non un guasto — l'ente pubblica quando
+      ci sono criticita/comunicati, non un flusso costante. Da NON trattare come fonte
+      morta nel report (a differenza di feed realmente offline/404); da riattivare
+      l'attenzione se e quando inizia a restituire item, segno di una novita reale
+      sul bacino. Copertura dell'area comunque garantita da Alto Calore Servizi (attivo).
 
   B5:
     name: "Tecnologia, AI e Biosicurezza"

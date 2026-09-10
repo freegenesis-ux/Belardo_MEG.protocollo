@@ -149,6 +149,9 @@ sources:
   B4_3:
     label: Idrologia Locale Campania
     feeds:
+    # SILENZIO INFORMATIVO LEGITTIMO: risponde 200/lastBuildDate live ma spesso
+    # 0 item — l'ente pubblica solo quando ci sono criticita, non un flusso costante.
+    # Non e una fonte morta: vedi note su B4_3 in meg_protocol.yaml.
     - id: abdam_news
       label: ABDAM Notizie
       url: https://www.distrettoappenninomeridionale.it/feed
