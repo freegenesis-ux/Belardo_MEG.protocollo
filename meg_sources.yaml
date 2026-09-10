@@ -103,11 +103,6 @@ sources:
       url: https://www.nhc.noaa.gov/nhc_ep1.xml
       type: rss
       tier: 1
-    - id: wmo_news
-      label: WMO News (via ReliefWeb)
-      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1205%29
-      type: rss
-      tier: 2
     - id: esa_space
       label: ESA Space News
       url: https://www.esa.int/rssfeed/Our_Activities/Space_Safety
@@ -119,21 +114,6 @@ sources:
     - id: fao_news
       label: FAO Newsroom (diretto)
       url: https://www.fao.org/feeds/fao-newsroom-rss
-      type: rss
-      tier: 1
-    - id: wfp_news
-      label: WFP News (via ReliefWeb)
-      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1741%29
-      type: rss
-      tier: 1
-    - id: unhcr_news
-      label: UNHCR News (via ReliefWeb)
-      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S2868%29
-      type: rss
-      tier: 1
-    - id: ipc_alerts
-      label: IPC Food Security (via ReliefWeb)
-      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S3495%29
       type: rss
       tier: 1
     - id: aljazeera_humanitarian
