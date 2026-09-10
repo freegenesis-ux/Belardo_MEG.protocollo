@@ -180,17 +180,6 @@ sources:
   B7:
     label: Economia e Mercati Globali
     feeds:
-    - id: stooq_snapshot
-      label: Stooq Indici/Valute/Oro (storico 10gg)
-      url: https://stooq.com/q/d/l/
-      type: stooq_multi
-      tier: 1
-      symbols:
-      - ^spx
-      - ^vix
-      - ^dax
-      - xauusd
-      - eurusd
     - id: yahoo_finance_multi
       label: Yahoo Finance Indici/Valute/Oro (no-key, fallback)
       url: https://query1.finance.yahoo.com/v8/finance/chart/
