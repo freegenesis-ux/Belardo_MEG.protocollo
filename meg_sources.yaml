@@ -69,11 +69,6 @@ sources:
       url: https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations-info/?limit=15
       type: copernicus_ems_json
       tier: 1
-    - id: reliefweb_geo
-      label: ReliefWeb Geo
-      url: https://reliefweb.int/updates/rss.xml?theme=4591
-      type: rss
-      tier: 2
     - id: nasa_earthdata
       label: NASA EONET Events
       url: https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=20
@@ -171,11 +166,6 @@ sources:
       url: https://publications.jrc.ec.europa.eu/repository/feed/rss_2.0/site
       type: rss
       tier: 1
-    - id: reliefweb_drought
-      label: ReliefWeb Drought
-      url: https://reliefweb.int/updates/rss.xml?theme=4601
-      type: rss
-      tier: 2
   B4_3:
     label: Idrologia Locale Campania
     feeds:
