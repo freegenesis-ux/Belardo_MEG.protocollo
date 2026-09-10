@@ -162,11 +162,6 @@ sources:
   B5:
     label: Tecnologia, AI e Biosicurezza
     feeds:
-    - id: who_disease
-      label: WHO Disease Outbreaks (via ReliefWeb)
-      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1275%29
-      type: rss
-      tier: 1
     - id: iaea_news
       label: IAEA Top News (diretto)
       url: https://www.iaea.org/feeds/topnews
@@ -246,19 +241,14 @@ sources:
       url: https://www.federalreserve.gov/feeds/press_all.xml
       type: rss
       tier: 1
-    - id: imf_news
-      label: IMF News (via ReliefWeb)
-      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1169%29
-      type: rss
-      tier: 1
     - id: google_econ_it
       label: Google News Crisi Economica/Finanziaria (IT)
-      url: https://news.google.com/rss/search?q=crisi+economica+finanziaria+quando:1d&hl=it&gl=IT&ceid=IT:it
+      url: https://news.google.com/rss/search?q=crisi+economica+OR+crisi+finanziaria+OR+recessione&hl=it&gl=IT&ceid=IT:it
       type: rss
       tier: 2
     - id: google_econ_en
       label: Google News Market Crash/Recession Signal (EN)
-      url: https://news.google.com/rss/search?q=market+crash+recession+signal+when:1d&hl=en&gl=US&ceid=US:en
+      url: https://news.google.com/rss/search?q=%22market+crash%22+OR+recession+OR+%22recession+signal%22&hl=en&gl=US&ceid=US:en
       type: rss
       tier: 2
   B6:
@@ -323,5 +313,15 @@ generalist_sources:
 - id: gnews_wmo_climate_ai
   label: Google News - WMO/Extreme Weather (smistato da AI, sostituisce WMO bloccato)
   url: https://news.google.com/rss/search?q=WMO+OR+%22extreme+weather%22+OR+%22El+Nino%22&hl=en-US&gl=US&ceid=US:en
+  type: rss
+  tier: 2
+- id: gnews_who_disease_ai
+  label: Google News - WHO Disease Outbreaks (smistato da AI, sostituisce WHO bloccato)
+  url: https://news.google.com/rss/search?q=%22disease+outbreak%22+OR+WHO+OR+epidemic&hl=en-US&gl=US&ceid=US:en
+  type: rss
+  tier: 2
+- id: gnews_imf_econ_ai
+  label: Google News - IMF/Crisi Economica (smistato da AI, sostituisce IMF bloccato)
+  url: https://news.google.com/rss/search?q=IMF+OR+%22economic+crisis%22+OR+recession&hl=en-US&gl=US&ceid=US:en
   type: rss
   tier: 2
