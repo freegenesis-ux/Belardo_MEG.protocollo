@@ -66,7 +66,7 @@ sources:
     feeds:
     - id: copernicus_ems
       label: Copernicus EMS (API JSON)
-      url: "https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations-info/?limit=15"
+      url: https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations-info/?limit=15
       type: copernicus_ems_json
       tier: 1
     - id: reliefweb_geo
@@ -110,7 +110,7 @@ sources:
       tier: 1
     - id: wmo_news
       label: WMO News (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1205%29"
+      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1205%29
       type: rss
       tier: 2
     - id: esa_space
@@ -123,22 +123,22 @@ sources:
     feeds:
     - id: fao_news
       label: FAO Newsroom (diretto)
-      url: "https://www.fao.org/feeds/fao-newsroom-rss"
+      url: https://www.fao.org/feeds/fao-newsroom-rss
       type: rss
       tier: 1
     - id: wfp_news
       label: WFP News (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1741%29"
+      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1741%29
       type: rss
       tier: 1
     - id: unhcr_news
       label: UNHCR News (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S2868%29"
+      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S2868%29
       type: rss
       tier: 1
     - id: ipc_alerts
       label: IPC Food Security (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S3495%29"
+      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S3495%29
       type: rss
       tier: 1
     - id: aljazeera_humanitarian
@@ -147,22 +147,22 @@ sources:
       type: rss
       tier: 2
       keywords:
-        - famine
-        - food security
-        - food crisis
-        - hunger
-        - malnutrition
-        - drought
-        - refugee
-        - refugees
-        - displaced
-        - displacement
-        - migrant
-        - migrants
-        - asylum
-        - humanitarian crisis
-        - aid agency
-        - starvation
+      - famine
+      - food security
+      - food crisis
+      - hunger
+      - malnutrition
+      - drought
+      - refugee
+      - refugees
+      - displaced
+      - displacement
+      - migrant
+      - migrants
+      - asylum
+      - humanitarian crisis
+      - aid agency
+      - starvation
   B4_2:
     label: Idrologia Civile Globale
     feeds:
@@ -194,12 +194,12 @@ sources:
     feeds:
     - id: who_disease
       label: WHO Disease Outbreaks (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1275%29"
+      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1275%29
       type: rss
       tier: 1
     - id: iaea_news
       label: IAEA Top News (diretto)
-      url: "https://www.iaea.org/feeds/topnews"
+      url: https://www.iaea.org/feeds/topnews
       type: rss
       tier: 1
     - id: ecdc_threats
@@ -215,34 +215,57 @@ sources:
   B7:
     label: Economia e Mercati Globali
     feeds:
-    # -- Strutturate: valore numerico deterministico, filled_by="fetcher" --
     - id: stooq_snapshot
       label: Stooq Indici/Valute/Oro (storico 10gg)
       url: https://stooq.com/q/d/l/
       type: stooq_multi
       tier: 1
-      symbols: ["^spx", "^vix", "^dax", "xauusd", "eurusd"]
+      symbols:
+      - ^spx
+      - ^vix
+      - ^dax
+      - xauusd
+      - eurusd
     - id: yahoo_finance_multi
       label: Yahoo Finance Indici/Valute/Oro (no-key, fallback)
       url: https://query1.finance.yahoo.com/v8/finance/chart/
       type: yahoo_multi
       tier: 1
       symbols:
-        - { yahoo: "^GSPC",    key: "stock_index_drawdown", name: "S&P 500" }
-        - { yahoo: "^VIX",     key: "vix_level",            name: "VIX" }
-        - { yahoo: "^GDAXI",   key: "stock_index_drawdown", name: "DAX" }
-        - { yahoo: "GC=F",     key: "gold_price_surge",     name: "Oro Futures (GC=F)" }
-        - { yahoo: "EURUSD=X", key: "fx_volatility",        name: "EUR/USD" }
+      - yahoo: ^GSPC
+        key: stock_index_drawdown
+        name: S&P 500
+      - yahoo: ^VIX
+        key: vix_level
+        name: VIX
+      - yahoo: ^GDAXI
+        key: stock_index_drawdown
+        name: DAX
+      - yahoo: GC=F
+        key: gold_price_surge
+        name: Oro Futures (GC=F)
+      - yahoo: EURUSD=X
+        key: fx_volatility
+        name: EUR/USD
     - id: alphavantage_multi
       label: Alpha Vantage S&P/Oro/EUR-USD (richiede ALPHAVANTAGE_KEY, throttled 3h)
       url: https://www.alphavantage.co/query
       type: alphavantage_multi
       tier: 1
       symbols:
-        - { function: "TIME_SERIES_DAILY", symbol: "SPY", key: "stock_index_drawdown", name: "S&P 500 (SPY ETF)" }
-        - { function: "TIME_SERIES_DAILY", symbol: "GLD", key: "gold_price_surge",     name: "Oro (GLD ETF)" }
-        - { function: "FX_DAILY", from_symbol: "EUR", to_symbol: "USD", key: "fx_volatility", name: "EUR/USD" }
-    # -- Istituzionali testuali: filled_by="pending_reasoning" --
+      - function: TIME_SERIES_DAILY
+        symbol: SPY
+        key: stock_index_drawdown
+        name: S&P 500 (SPY ETF)
+      - function: TIME_SERIES_DAILY
+        symbol: GLD
+        key: gold_price_surge
+        name: Oro (GLD ETF)
+      - function: FX_DAILY
+        from_symbol: EUR
+        to_symbol: USD
+        key: fx_volatility
+        name: EUR/USD
     - id: ecb_press
       label: ECB Press Releases
       url: https://www.ecb.europa.eu/rss/press.html
@@ -255,7 +278,7 @@ sources:
       tier: 1
     - id: imf_news
       label: IMF News (via ReliefWeb)
-      url: "https://reliefweb.int/updates/rss.xml?advanced-search=%28S1169%29"
+      url: https://reliefweb.int/updates/rss.xml?advanced-search=%28S1169%29
       type: rss
       tier: 1
     - id: google_econ_it
@@ -291,30 +314,44 @@ sources:
       url: https://www.rigzone.com/news/rss/rigzone_latest.aspx
       type: rss
       tier: 2
-
 generalist_sources:
-  - id: aljazeera_ai
-    label: Al Jazeera (smistato da AI)
-    url: https://www.aljazeera.com/xml/rss/all.xml
-    type: rss
-    tier: 2
-  - id: gdacs_ai
-    label: GDACS Alerts (smistato da AI)
-    url: https://www.gdacs.org/xml/rss.xml
-    type: rss
-    tier: 1
-  - id: ispra_ai
-    label: ISPRA Notizie (smistato da AI)
-    url: https://www.isprambiente.gov.it/it/news/notizie/RSS
-    type: rss
-    tier: 1
-  - id: ansa_campania_ai
-    label: ANSA Campania (smistato da AI)
-    url: https://www.ansa.it/campania/notizie/campania_rss.xml
-    type: rss
-    tier: 2
-  - id: marketwatch_ai
-    label: MarketWatch Top Stories (smistato da AI)
-    url: https://www.marketwatch.com/rss/topstories
-    type: rss
-    tier: 2
+- id: aljazeera_ai
+  label: Al Jazeera (smistato da AI)
+  url: https://www.aljazeera.com/xml/rss/all.xml
+  type: rss
+  tier: 2
+- id: gdacs_ai
+  label: GDACS Alerts (smistato da AI)
+  url: https://www.gdacs.org/xml/rss.xml
+  type: rss
+  tier: 1
+- id: ispra_ai
+  label: ISPRA Notizie (smistato da AI)
+  url: https://www.isprambiente.gov.it/it/news/notizie/RSS
+  type: rss
+  tier: 1
+- id: ansa_campania_ai
+  label: ANSA Campania (smistato da AI)
+  url: https://www.ansa.it/campania/notizie/campania_rss.xml
+  type: rss
+  tier: 2
+- id: marketwatch_ai
+  label: MarketWatch Top Stories (smistato da AI)
+  url: https://www.marketwatch.com/rss/topstories
+  type: rss
+  tier: 2
+- id: gnews_food_security_ai
+  label: Google News - Food Security (smistato da AI, sostituisce WFP/IPC bloccati)
+  url: https://news.google.com/rss/search?q=famine+OR+%22food+security+crisis%22+OR+%22acute+food+insecurity%22+OR+WFP&hl=en-US&gl=US&ceid=US:en
+  type: rss
+  tier: 2
+- id: gnews_refugees_ai
+  label: Google News - Refugees/Displacement (smistato da AI, sostituisce UNHCR bloccato)
+  url: https://news.google.com/rss/search?q=refugees+OR+UNHCR+OR+displacement&hl=en-US&gl=US&ceid=US:en
+  type: rss
+  tier: 2
+- id: gnews_wmo_climate_ai
+  label: Google News - WMO/Extreme Weather (smistato da AI, sostituisce WMO bloccato)
+  url: https://news.google.com/rss/search?q=WMO+OR+%22extreme+weather%22+OR+%22El+Nino%22&hl=en-US&gl=US&ceid=US:en
+  type: rss
+  tier: 2
