@@ -268,6 +268,7 @@ generalist_sources:
   type: rss
   tier: 2
 - id: gdacs_ai
+  fast: true
   fallback_keywords:
     B2_1_2: [earthquake, volcano, volcanic, tsunami]
     B2_3: [flood, cyclone, hurricane, typhoon, storm, drought, wildfire, landslide]
@@ -286,6 +287,7 @@ generalist_sources:
   type: rss
   tier: 2
 - id: marketwatch_ai
+  fast: true
   label: MarketWatch Top Stories (smistato da AI)
   url: https://www.marketwatch.com/rss/topstories
   type: rss

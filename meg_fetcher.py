@@ -1291,6 +1291,91 @@ async def fetch_one_feed(client: httpx.AsyncClient, feed: dict,
 
 # ── MAIN FETCH ORCHESTRATOR ───────────────────────────────────────────────────
 
+def _count_events_in_file(path):
+    """Eventi (righe senza record_type) di un JSONL esistente; None se illeggibile."""
+    try:
+        n = 0
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(o, dict) and "record_type" not in o:
+                    n += 1
+        return n
+    except Exception:
+        return None
+
+
+def assess_data_quality(source_status, stats, protocol, area_filter, prev_total):
+    """Valuta quanto e' affidabile il file prodotto. Livelli (dal migliore al peggiore):
+    COMPLETE, DEGRADED, PARTIAL, CORRUPT_SUSPECT. Ritorna un dict da inserire in source_status."""
+    order = ["COMPLETE", "DEGRADED", "PARTIAL", "CORRUPT_SUSPECT"]
+    level = "COMPLETE"
+    reasons = []
+
+    def bump(new):
+        nonlocal level
+        if order.index(new) > order.index(level):
+            level = new
+
+    n_src = max(len(source_status), 1)
+    failed = [s for s in source_status if s["status"] in ("error", "ai_unavailable")]
+    degraded = [s for s in source_status if s["status"] == "degraded_fallback"]
+    total = stats.get("total", 0)
+
+    if total == 0:
+        bump("CORRUPT_SUSPECT")
+        reasons.append("0 eventi raccolti")
+    if prev_total and prev_total >= 20 and total < 0.5 * prev_total:
+        bump("CORRUPT_SUSPECT")
+        reasons.append(f"eventi crollati: {total} contro {prev_total} del run precedente")
+    if len(failed) / n_src >= 0.4:
+        bump("CORRUPT_SUSPECT")
+        reasons.append(f"oltre il 40% delle fonti non risponde ({len(failed)}/{n_src})")
+    elif len(failed) / n_src >= 0.15:
+        bump("PARTIAL")
+        reasons.append(f"{len(failed)}/{n_src} fonti non rispondono")
+
+    t1 = [s["id"] for s in failed if s.get("tier", 2) == 1]
+    t2 = [s["id"] for s in failed if s.get("tier", 2) != 1]
+    if t1:
+        bump("PARTIAL")
+        reasons.append("fonti tier 1 non disponibili: " + ", ".join(t1))
+    if t2:
+        bump("DEGRADED")
+        reasons.append("fonti tier 2 non disponibili: " + ", ".join(t2))
+    if degraded:
+        bump("DEGRADED")
+        reasons.append("notizie senza smistamento AI completo in: " + ", ".join(s["id"] for s in degraded))
+
+    areas = [area_filter] if area_filter else list(protocol.get("macro_areas", {}).keys())
+    blind = [a for a in areas if stats.get("by_area", {}).get(a, 0) == 0]
+    failed_areas = {s.get("area") for s in failed}
+    blind_hard = [a for a in blind if a in failed_areas]
+    blind_quiet = [a for a in blind if a not in failed_areas]
+    if blind_hard:
+        bump("PARTIAL")
+        reasons.append("aree CIECHE (senza eventi e con fonti guaste): " + ", ".join(blind_hard))
+    if blind_quiet:
+        bump("DEGRADED")
+        reasons.append("aree senza eventi in questo run (nessuna fonte guasta): " + ", ".join(blind_quiet))
+
+    return {
+        "data_quality": level,
+        "data_quality_reasons": reasons,
+        "blind_areas": blind,
+        "failed_sources": [s["id"] for s in failed],
+        "degraded_sources": [s["id"] for s in degraded],
+        "events_total": total,
+        "events_previous_run": prev_total,
+    }
+
+
 def build_protocol_record(protocol: dict) -> dict:
     """Record di istruzioni auto-contenuto: qualunque AI o umano che apre
     il JSONL trova qui come interpretare meg_flags, le soglie numeriche, e
@@ -1309,7 +1394,17 @@ def build_protocol_record(protocol: dict) -> dict:
         "generated_at": now_utc(),
         "field_semantics": {
             "filled_by":            "'fetcher' = valore numerico strutturato, valutato deterministicamente. 'pending_reasoning' = testo libero, richiede lettura/interpretazione da parte di un reasoning engine.",
-            "quality_flag":         protocol.get("quality_flags", {}),
+            "quality_flag":         {**protocol.get("quality_flags", {}),
+                                     "CLASSIFICATO_AI": "Area assegnata da un modello AI di smistamento (feed generalista).",
+                                     "FALLBACK_NO_AI": "Area assegnata da regola (area fissa del feed o parole chiave) perche' l'AI non era disponibile: non verificato."},
+            "source_status_values": {
+                "ok": "Fonte interrogata, eventi restituiti.",
+                "empty": "Fonte valida ma senza notizie nel periodo (non e' un guasto).",
+                "throttled": "Fonte volutamente non interrogata in questo run per rispettare i limiti del servizio (non e' un guasto).",
+                "error": "Fonte guasta o bloccata: i suoi eventi mancano.",
+                "ai_unavailable": "Smistamento AI non disponibile e nessun fallback: le notizie di questa fonte sono perse.",
+                "degraded_fallback": "Alcune notizie senza smistamento AI completo (area da regola o scartate).",
+            },
             "alert_level":          {
                 "INATTIVO":    "Nessuna soglia superata.",
                 "WATCHLIST":   "Sotto soglia di monitoraggio ma in avvicinamento (>=70% della soglia).",
@@ -1327,6 +1422,12 @@ def build_protocol_record(protocol: dict) -> dict:
             "Se un record source_status riporta status 'error' per una fonte tier 1, questo VA segnalato esplicitamente in apertura di report — non va ignorato silenziosamente.",
             "Finestra di riferimento raccomandata: rolling 48h dal timestamp extracted_at più recente nel file, salvo diversa richiesta esplicita.",
             "In caso di dati contrastanti tra fonti, segnalare il conflitto esplicitamente invece di produrne una media o sintesi che lo nasconda.",
+            "Il record source_status contiene data_quality (COMPLETE | DEGRADED | PARTIAL | CORRUPT_SUSPECT), data_quality_reasons, blind_areas, failed_sources, degraded_sources. Leggerlo SEMPRE prima di scrivere il report.",
+            "Se data_quality e' diverso da COMPLETE il report DEVE aprire con una riga 'QUALITA' DATI: <livello>' seguita dai motivi, dalle fonti non disponibili e dalle aree cieche.",
+            "Per le aree cieche e per le fonti non disponibili NON scrivere 'nessun evento' o 'nessuna novita': scrivere 'non osservabile (fonte non disponibile)'. L'assenza di dati non e' assenza di eventi.",
+            "Con DEGRADED o PARTIAL abbassare esplicitamente la confidenza di ogni incrocio causale che coinvolge un'area cieca o una fonte non disponibile, e dirlo.",
+            "Con CORRUPT_SUSPECT NON produrre previsioni ne' incroci causali: dichiarare che il file non e' affidabile e invitare a riscaricarlo dopo il prossimo ciclo di raccolta.",
+            "Gli eventi con quality_flag FALLBACK_NO_AI hanno l'area assegnata da una regola e non dall'AI: trattarli come non verificati.",
         ],
         "thresholds": protocol.get("thresholds", {}),
         "macro_areas": macro_areas_summary,
@@ -1342,7 +1443,8 @@ async def fetch_all(area_filter: Optional[str] = None,
     """
     sources  = load_sources()
     protocol = load_protocol()
-    generalist_sources = load_generalist_sources()
+    generalist_sources = [f for f in load_generalist_sources()
+                          if not area_filter or f.get("fast")]
 
     # Filtra per area se richiesto
     target = ({area_filter: sources[area_filter]}
@@ -1413,6 +1515,8 @@ async def fetch_all(area_filter: Optional[str] = None,
         err = error_by_source.get(feed_id)
         if err:
             status = "error"
+        elif len(events) == 0 and feed.get("type") == "alphavantage_multi":
+            status = "throttled"
         elif len(events) == 0:
             status = "empty"
         else:
@@ -1444,6 +1548,8 @@ async def fetch_all(area_filter: Optional[str] = None,
     OUTPUT_DIR.mkdir(exist_ok=True)
     if output_path is None:
         output_path = OUTPUT_DIR / f"meg_events_{ts_file()}.jsonl"
+    prev_total = _count_events_in_file(output_path) if Path(output_path).exists() else None
+    dq = assess_data_quality(source_status, stats, protocol, area_filter, prev_total)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(json.dumps(build_protocol_record(protocol), ensure_ascii=False) + "\n")
@@ -1454,6 +1560,7 @@ async def fetch_all(area_filter: Optional[str] = None,
             "failed_count": sum(1 for s in source_status if s["status"] in ("error", "ai_unavailable")),
             "degraded_count": sum(1 for s in source_status if s["status"] == "degraded_fallback"),
             "empty_count":  sum(1 for s in source_status if s["status"] == "empty"),
+            **dq,
         }, ensure_ascii=False) + "\n")
         for ev in all_events:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")

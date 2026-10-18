@@ -84,8 +84,33 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python3 meg_fetcher.py --out meg_events/latest.jsonl
 
+      - name: Validazione integrità (se corrotto non si pubblica e il run fallisce)
+        id: validate
+        run: |
+          set +e
+          corrupt=0
+          check() {
+            f="$1"
+            [ -f "$f" ] || return 0
+            git show "HEAD:$f" > /tmp/prev.jsonl 2>/dev/null || : > /tmp/prev.jsonl
+            python3 meg_validate.py "$f" --previous /tmp/prev.jsonl
+            if [ $? -ne 0 ]; then
+              echo "::error::$f corrotto o gravemente parziale: ripristino l'ultima versione valida"
+              git checkout -- "$f" 2>/dev/null
+              corrupt=1
+            fi
+          }
+          if [ "${{ steps.mode.outputs.value }}" = "full" ]; then
+            check meg_events/latest.jsonl
+          else
+            check meg_events/latest_fast_b7.jsonl
+            check meg_events/latest_fast_b2.jsonl
+            cat meg_events/latest_fast_b7.jsonl meg_events/latest_fast_b2.jsonl > meg_events/latest_fast.jsonl
+          fi
+          echo "corrupt=$corrupt" >> "$GITHUB_OUTPUT"
+
       - name: Copia in archivio timestampato (solo run full)
-        if: steps.mode.outputs.value == 'full'
+        if: steps.mode.outputs.value == 'full' && steps.validate.outputs.corrupt != '1'
         run: |
           mkdir -p meg_events/archive
           cp meg_events/latest.jsonl "meg_events/archive/meg_events_$(date -u +%Y%m%d_%H%M).jsonl"
@@ -115,3 +140,9 @@ jobs:
           gh release upload latest $FILES --clobber || \
           gh release upload latest $FILES --clobber || \
           gh release upload latest $FILES --clobber
+
+      - name: Segnala fallimento se i dati erano corrotti
+        if: steps.validate.outputs.corrupt == '1'
+        run: |
+          echo "::error::Dati corrotti o gravemente parziali: e' rimasta pubblicata l'ultima versione valida. Vedi lo step Validazione integrità."
+          exit 1
