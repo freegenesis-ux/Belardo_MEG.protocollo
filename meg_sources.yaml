@@ -273,6 +273,9 @@ generalist_sources:
   type: rss
   tier: 2
 - id: gdacs_ai
+  fallback_keywords:
+    B2_1_2: [earthquake, volcano, volcanic, tsunami]
+    B2_3: [flood, cyclone, hurricane, typhoon, storm, drought, wildfire, landslide]
   label: GDACS Alerts (smistato da AI)
   url: https://www.gdacs.org/xml/rss.xml
   type: rss
@@ -293,26 +296,31 @@ generalist_sources:
   type: rss
   tier: 2
 - id: gnews_food_security_ai
+  fallback_area: B4_1
   label: Google News - Food Security (smistato da AI, sostituisce WFP/IPC bloccati)
   url: https://news.google.com/rss/search?q=famine+OR+%22food+security+crisis%22+OR+%22acute+food+insecurity%22+OR+WFP&hl=en-US&gl=US&ceid=US:en
   type: rss
   tier: 2
 - id: gnews_refugees_ai
+  fallback_area: B4_1
   label: Google News - Refugees/Displacement (smistato da AI, sostituisce UNHCR bloccato)
   url: https://news.google.com/rss/search?q=refugees+OR+UNHCR+OR+displacement&hl=en-US&gl=US&ceid=US:en
   type: rss
   tier: 2
 - id: gnews_wmo_climate_ai
+  fallback_area: B3
   label: Google News - WMO/Extreme Weather (smistato da AI, sostituisce WMO bloccato)
   url: https://news.google.com/rss/search?q=WMO+OR+%22extreme+weather%22+OR+%22El+Nino%22&hl=en-US&gl=US&ceid=US:en
   type: rss
   tier: 2
 - id: gnews_who_disease_ai
+  fallback_area: B5
   label: Google News - WHO Disease Outbreaks (smistato da AI, sostituisce WHO bloccato)
   url: https://news.google.com/rss/search?q=%22disease+outbreak%22+OR+WHO+OR+epidemic&hl=en-US&gl=US&ceid=US:en
   type: rss
   tier: 2
 - id: gnews_imf_econ_ai
+  fallback_area: B7
   label: Google News - IMF/Crisi Economica (smistato da AI, sostituisce IMF bloccato)
   url: https://news.google.com/rss/search?q=IMF+OR+%22economic+crisis%22+OR+recession&hl=en-US&gl=US&ceid=US:en
   type: rss

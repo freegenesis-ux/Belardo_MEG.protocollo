@@ -51,6 +51,102 @@ GROQ_MODEL    = "openai/gpt-oss-20b"
 GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions"
 AI_BATCH_SIZE = 20
 
+# --- Groq resilience (patch_meg_groq_cache) ---------------------------------
+AI_CACHE_TTL_HOURS = 48
+GROQ_EXHAUSTED = False
+GROQ_MODELS = [GROQ_MODEL, os.environ.get("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")]
+_GROQ_MODEL_IDX = 0
+
+
+def _groq_model() -> str:
+    return GROQ_MODELS[_GROQ_MODEL_IDX]
+
+
+def _groq_switch_model() -> bool:
+    global _GROQ_MODEL_IDX
+    if _GROQ_MODEL_IDX + 1 < len(GROQ_MODELS):
+        _GROQ_MODEL_IDX += 1
+        print(f"  [GROQ] quota giornaliera esaurita: passo al modello {GROQ_MODELS[_GROQ_MODEL_IDX]}", flush=True)
+        return True
+    return False
+
+
+def _ai_cache_path():
+    import os as _os
+    import pathlib as _pl
+    env = _os.environ.get("MEG_AI_CACHE")
+    if env:
+        return _pl.Path(env).expanduser()
+    return _pl.Path(__file__).resolve().parent / "meg_events" / ".ai_cache.json"
+
+
+def _ai_key(title: str) -> str:
+    import hashlib as _hl
+    return _hl.sha1((title or "").strip().lower().encode("utf-8")).hexdigest()[:16]
+
+
+def _ai_cache_load() -> dict:
+    import time as _time
+    try:
+        data = json.loads(_ai_cache_path().read_text(encoding="utf-8"))
+        cutoff = _time.time() - AI_CACHE_TTL_HOURS * 3600
+        return {k: v for k, v in data.items()
+                if isinstance(v, dict) and v.get("t", 0) >= cutoff}
+    except Exception:
+        return {}
+
+
+def _ai_cache_save(cache: dict) -> None:
+    import time as _time
+    try:
+        cutoff = _time.time() - AI_CACHE_TTL_HOURS * 3600
+        cache = {k: v for k, v in cache.items() if v.get("t", 0) >= cutoff}
+        p = _ai_cache_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(cache, ensure_ascii=False, separators=(",", ":")),
+                     encoding="utf-8")
+    except Exception as e:
+        print(f"  [WARN] cache AI non salvata: {e}")
+
+
+def _groq_mark_failure(e) -> None:
+    global GROQ_EXHAUSTED
+    s = str(e)
+    if "429" in s or "quota" in s.lower():
+        GROQ_EXHAUSTED = True
+
+
+async def _groq_backoff(resp, attempt: int) -> None:
+    body = ""
+    try:
+        body = resp.text[:300]
+    except Exception:
+        pass
+    print(f"  [GROQ 429] tentativo {attempt + 1}: {body}", flush=True)
+    low = body.lower()
+    if "per day" in low or "tpd" in low or "rpd" in low:
+        if _groq_switch_model():
+            return
+        raise RuntimeError("Groq quota giornaliera esaurita (429): " + body[:120])
+    try:
+        wait = float(resp.headers.get("retry-after"))
+    except Exception:
+        wait = [15, 30, 60, 65][min(attempt, 3)]
+    await asyncio.sleep(min(wait, 70))
+
+
+def _fallback_area_for(feed: dict, item: dict, valid_areas: dict):
+    fa = feed.get("fallback_area")
+    if fa in valid_areas:
+        return fa
+    fk = feed.get("fallback_keywords") or {}
+    text = ((item.get("title") or "") + " " + (item.get("summary") or "")).lower()
+    for aid, kws in fk.items():
+        if aid in valid_areas and any(str(k).lower() in text for k in kws):
+            return aid
+    return None
+# ----------------------------------------------------------------------------
+
 # Rotazione User-Agent + retry — stessa logica di resilienza del Pannello CV
 # (dove un singolo proxy CORS instabile veniva scavalcato con una catena di
 # fallback). Qui non serve un proxy (il fetcher gira server-side, nessun CORS),
@@ -861,9 +957,12 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
     if not GROQ_API_KEY:
         return {}
 
+    if GROQ_EXHAUSTED:
+        return {}
+
     area_list_txt = "\n".join(f"- {aid}: {name}" for aid, name in valid_areas.items())
     items_txt = "\n".join(
-        f"{i}. {it['title']} — {(it.get('summary') or '')[:200]}"
+        f"{i}. {it['title']} — {(it.get('summary') or '')[:100]}"
         for i, it in enumerate(items)
     )
     prompt = (
@@ -879,29 +978,31 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
 
     try:
         async with GROQ_SEMAPHORE:
-            for attempt in range(3):
+            if GROQ_EXHAUSTED:
+                return {}
+            for attempt in range(5):
                 try:
                     r = await client.post(
                         GROQ_URL,
                         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                         json={
-                            "model": GROQ_MODEL,
+                            "model": _groq_model(),
                             "messages": [{"role": "user", "content": prompt}],
                             "temperature": 0,
                             "response_format": {"type": "json_object"},
                             "max_completion_tokens": 4096,
-                            "reasoning_effort": "low",
+                            **({"reasoning_effort": "low"} if "gpt-oss" in _groq_model() else {}),
                         },
                         timeout=40,
                     )
-                    if r.status_code == 429 and attempt < 2:
-                        await asyncio.sleep(5 * (attempt + 1))
+                    if r.status_code == 429 and attempt < 4:
+                        await _groq_backoff(r, attempt)
                         continue
                     r.raise_for_status()
                     break
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429 and attempt < 2:
-                        await asyncio.sleep(5 * (attempt + 1))
+                    if e.response.status_code == 429 and attempt < 4:
+                        await _groq_backoff(e.response, attempt)
                         continue
                     raise
         content = r.json()["choices"][0]["message"]["content"]
@@ -912,6 +1013,7 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
             out[idx] = v if v in valid_areas else None
         return out
     except Exception as e:
+        _groq_mark_failure(e)
         record_error("classify_titles_ai", "generalist", e)
         return {}
 
@@ -950,20 +1052,40 @@ async def fetch_generalist_source(client: httpx.AsyncClient, feed: dict,
     if not entries:
         return [], "empty"
 
-    if not GROQ_API_KEY:
-        return [], "ai_unavailable"
-
     items = [{
         "title": getattr(e, "title", "") or "",
         "summary": getattr(e, "summary", "") or "",
     } for e in entries]
 
     assignments: dict[int, Optional[str]] = {}
-    for start in range(0, len(items), AI_BATCH_SIZE):
-        batch = items[start:start + AI_BATCH_SIZE]
+    import time as _time
+    cache = _ai_cache_load()
+    pending: list[int] = []
+    for i, it in enumerate(items):
+        ck = _ai_key(it["title"])
+        if ck in cache:
+            assignments[i] = cache[ck].get("a")
+        else:
+            pending.append(i)
+
+    for start in range(0, len(pending), AI_BATCH_SIZE):
+        idxs = pending[start:start + AI_BATCH_SIZE]
+        batch = [items[i] for i in idxs]
         result = await classify_titles_ai(client, batch, valid_areas)
         for local_idx, area in result.items():
-            assignments[start + local_idx] = area
+            if 0 <= local_idx < len(idxs):
+                gi = idxs[local_idx]
+                assignments[gi] = area
+                cache[_ai_key(items[gi]["title"])] = {"a": area, "t": _time.time()}
+    _ai_cache_save(cache)
+
+    fallback_idx: set[int] = set()
+    for gi in pending:
+        if gi not in assignments:
+            fb = _fallback_area_for(feed, items[gi], valid_areas)
+            if fb:
+                assignments[gi] = fb
+                fallback_idx.add(gi)
 
     if not assignments:
         return [], "ai_unavailable"
@@ -976,9 +1098,12 @@ async def fetch_generalist_source(client: httpx.AsyncClient, feed: dict,
         area_label = valid_areas.get(area_id, area_id)
         ev = normalize_rss_item(entry, feed, area_id, area_label)
         if ev:
-            ev["meg_flags"]["quality_flag"] = "CLASSIFICATO_AI"
+            ev["meg_flags"]["quality_flag"] = (
+                "FALLBACK_NO_AI" if i in fallback_idx else "CLASSIFICATO_AI")
             events.append(ev)
 
+    if events and fallback_idx:
+        return events, "degraded_fallback"
     return events, ("ok" if events else "empty")
 
 
@@ -1251,7 +1376,8 @@ async def fetch_all(area_filter: Optional[str] = None,
             "record_type": "source_status",
             "checked_at":  now_utc(),
             "sources":     source_status,
-            "failed_count": sum(1 for s in source_status if s["status"] == "error"),
+            "failed_count": sum(1 for s in source_status if s["status"] in ("error", "ai_unavailable")),
+            "degraded_count": sum(1 for s in source_status if s["status"] == "degraded_fallback"),
             "empty_count":  sum(1 for s in source_status if s["status"] == "empty"),
         }, ensure_ascii=False) + "\n")
         for ev in all_events:
