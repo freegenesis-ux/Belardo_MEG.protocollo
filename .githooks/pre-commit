@@ -1,0 +1,10 @@
+#!/bin/sh
+# MEG key guard: blocca chiavi API nei commit.
+PATTERN='AIza[0-9A-Za-z_-]{30,}|AQ\.[A-Za-z0-9_-]{30,}|gsk_[A-Za-z0-9]{20,}|sk-or-[A-Za-z0-9-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|(API_KEY|APIKEY|SECRET|TOKEN)[A-Za-z_]*[ ]*[=:][ ]*["'"'"'][A-Za-z0-9_.-]{20,}["'"'"']'
+HITS=$(git diff --cached -U0 --no-color | grep -E '^\+[^+]' | grep -E "$PATTERN" | cut -c1-60)
+if [ -n "$HITS" ]; then
+  echo "COMMIT BLOCCATO: possibile chiave API nelle modifiche:" >&2
+  echo "$HITS" | sed 's/\(.\{30\}\).*/\1.../' >&2
+  echo "Le chiavi vanno solo nei secret di GitHub, mai nel repo." >&2
+  exit 1
+fi

@@ -54,26 +54,76 @@ AI_BATCH_SIZE = 20
 # --- Groq resilience (patch_meg_groq_cache) ---------------------------------
 AI_CACHE_TTL_HOURS = 48
 GROQ_EXHAUSTED = False
-GROQ_MODELS = [GROQ_MODEL] + [
-    m.strip() for m in os.environ.get(
-        "GROQ_FALLBACK_MODELS",
-        "openai/gpt-oss-120b,llama-3.3-70b-versatile,qwen/qwen3.8-27b",
-    ).split(",") if m.strip()
-]
+GROQ_FALLBACK_MODELS = os.environ.get(
+    "GROQ_FALLBACK_MODELS",
+    "openai/gpt-oss-120b,llama-3.3-70b-versatile,qwen/qwen3.8-27b",
+)
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def _csv(s: str) -> list:
+    return [x.strip() for x in (s or "").split(",") if x.strip()]
+
+
+def _build_ai_chain() -> list:
+    """Catena ordinata (provider, url, chiave, modello). Provider senza chiave: ignorato."""
+    chain = []
+    if GROQ_API_KEY:
+        for m in [GROQ_MODEL] + _csv(GROQ_FALLBACK_MODELS):
+            chain.append({"provider": "groq", "url": GROQ_URL, "key": GROQ_API_KEY, "model": m})
+    gk = os.environ.get("GEMINI_API_KEY")
+    if gk:
+        for m in _csv(os.environ.get("GEMINI_MODELS", "gemini-3.5-flash-lite,gemini-3.5-flash")):
+            chain.append({"provider": "gemini", "url": GEMINI_URL, "key": gk, "model": m})
+    ok = os.environ.get("OPENROUTER_API_KEY")
+    if ok:
+        for m in _csv(os.environ.get("OPENROUTER_MODELS",
+                                     "openai/gpt-oss-20b:free,meta-llama/llama-3.3-70b-instruct:free")):
+            chain.append({"provider": "openrouter", "url": OPENROUTER_URL, "key": ok, "model": m})
+    return chain
+
+
+_AI_CHAIN = _build_ai_chain()
 _GROQ_MODEL_IDX = 0
+_AI_CACHE_SHARED = None
+_AI_WAITS = 0
+
+
+def _ai_cur() -> dict:
+    return _AI_CHAIN[_GROQ_MODEL_IDX]
 
 
 def _groq_model() -> str:
-    return GROQ_MODELS[_GROQ_MODEL_IDX]
+    return _ai_cur()["model"]
 
 
 def _groq_switch_model() -> bool:
-    global _GROQ_MODEL_IDX
-    if _GROQ_MODEL_IDX + 1 < len(GROQ_MODELS):
+    global _GROQ_MODEL_IDX, _AI_WAITS
+    if _GROQ_MODEL_IDX + 1 < len(_AI_CHAIN):
         _GROQ_MODEL_IDX += 1
-        print(f"  [GROQ] cambio modello (quota o errore): ora {GROQ_MODELS[_GROQ_MODEL_IDX]}", flush=True)
+        _AI_WAITS = 0
+        c = _ai_cur()
+        print(f"  [AI] cambio (quota o errore): ora {c['provider']}/{c['model']}", flush=True)
         return True
     return False
+
+
+def _ai_cache_shared() -> dict:
+    """Una sola cache per processo: i feed paralleli non si sovrascrivono a vicenda."""
+    global _AI_CACHE_SHARED
+    if _AI_CACHE_SHARED is None:
+        _AI_CACHE_SHARED = _ai_cache_load()
+    return _AI_CACHE_SHARED
+
+
+def _ai_parse_json(content: str):
+    import re as _re
+    t = _re.sub(r"<think>.*?</think>", "", content or "", flags=_re.DOTALL)
+    i, j = t.find("{"), t.rfind("}")
+    if i < 0 or j < i:
+        raise ValueError("risposta AI senza JSON")
+    return json.loads(t[i:j + 1])
 
 
 def _ai_cache_path():
@@ -129,14 +179,18 @@ async def _groq_backoff(resp, attempt: int) -> None:
         pass
     print(f"  [GROQ 429] tentativo {attempt + 1}: {body}", flush=True)
     low = body.lower()
-    if "per day" in low or "tpd" in low or "rpd" in low:
+    if any(w in low for w in ("per day", "per-day", "perday", "tpd", "rpd")):
         if _groq_switch_model():
             return
         raise RuntimeError("Groq quota giornaliera esaurita (429): " + body[:120])
+    global _AI_WAITS
+    _AI_WAITS += 1
+    if _AI_WAITS > 2 and _groq_switch_model():
+        return
     try:
         wait = float(resp.headers.get("retry-after"))
     except Exception:
-        wait = [15, 30, 60, 65][min(attempt, 3)]
+        wait = [15, 30, 60][min(_AI_WAITS - 1, 2)]
     await asyncio.sleep(min(wait, 70))
 
 
@@ -959,7 +1013,7 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
     inventa un'area — se l'AI non risponde, quegli item vengono saltati,
     non forzati in un'area a caso.
     """
-    if not GROQ_API_KEY:
+    if not _AI_CHAIN:
         return {}
 
     if GROQ_EXHAUSTED:
@@ -985,38 +1039,39 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
         async with GROQ_SEMAPHORE:
             if GROQ_EXHAUSTED:
                 return {}
-            for attempt in range(5):
+            for attempt in range(len(_AI_CHAIN) + 4):
                 try:
                     r = await client.post(
-                        GROQ_URL,
-                        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                        _ai_cur()["url"],
+                        headers={"Authorization": f"Bearer {_ai_cur()['key']}"},
                         json={
                             "model": _groq_model(),
                             "messages": [{"role": "user", "content": prompt}],
                             "temperature": 0,
-                            "response_format": {"type": "json_object"},
-                            "max_completion_tokens": 4096,
-                            **({"reasoning_effort": "low"} if "gpt-oss" in _groq_model() else {}),
+                            **({"response_format": {"type": "json_object"}} if _ai_cur()["provider"] == "groq" else {}),
+                            **({"max_completion_tokens": 4096} if _ai_cur()["provider"] == "groq" else {"max_tokens": 4096}),
+                            **({"reasoning_effort": "low"}
+                               if _ai_cur()["provider"] == "groq" and "gpt-oss" in _groq_model() else {}),
                         },
                         timeout=40,
                     )
-                    if r.status_code == 429 and attempt < 4:
+                    if r.status_code == 429 and attempt < len(_AI_CHAIN) + 3:
                         await _groq_backoff(r, attempt)
                         continue
                     r.raise_for_status()
                     break
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429 and attempt < 4:
+                    if e.response.status_code == 429 and attempt < len(_AI_CHAIN) + 3:
                         await _groq_backoff(e.response, attempt)
                         continue
-                    if e.response.status_code in (400, 404) and attempt < 4:
+                    if e.response.status_code in (400, 404) and attempt < len(_AI_CHAIN) + 3:
                         print(f"  [GROQ {e.response.status_code}] modello {_groq_model()}: "
                               f"{e.response.text[:200]}", flush=True)
                         if _groq_switch_model():
                             continue
                     raise
         content = r.json()["choices"][0]["message"]["content"]
-        raw = json.loads(content)
+        raw = _ai_parse_json(content)
         out: dict[int, Optional[str]] = {}
         for k, v in raw.items():
             idx = int(k)
@@ -1069,7 +1124,7 @@ async def fetch_generalist_source(client: httpx.AsyncClient, feed: dict,
 
     assignments: dict[int, Optional[str]] = {}
     import time as _time
-    cache = _ai_cache_load()
+    cache = _ai_cache_shared()
     pending: list[int] = []
     for i, it in enumerate(items):
         ck = _ai_key(it["title"])
@@ -1097,6 +1152,7 @@ async def fetch_generalist_source(client: httpx.AsyncClient, feed: dict,
                 assignments[gi] = fb
                 fallback_idx.add(gi)
 
+    lost_idx = [i for i in pending if i not in assignments]
     if not assignments:
         return [], "ai_unavailable"
 
@@ -1112,7 +1168,7 @@ async def fetch_generalist_source(client: httpx.AsyncClient, feed: dict,
                 "FALLBACK_NO_AI" if i in fallback_idx else "CLASSIFICATO_AI")
             events.append(ev)
 
-    if events and fallback_idx:
+    if events and (fallback_idx or lost_idx):
         return events, "degraded_fallback"
     return events, ("ok" if events else "empty")
 
