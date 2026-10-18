@@ -261,11 +261,6 @@ sources:
       url: https://www.qualenergia.it/feed/
       type: rss
       tier: 2
-    - id: rigzone
-      label: Rigzone Oil & Gas
-      url: https://www.rigzone.com/news/rss/rigzone_latest.aspx
-      type: rss
-      tier: 2
 generalist_sources:
 - id: aljazeera_ai
   label: Al Jazeera (smistato da AI)
@@ -317,6 +312,12 @@ generalist_sources:
   fallback_area: B5
   label: Google News - WHO Disease Outbreaks (smistato da AI, sostituisce WHO bloccato)
   url: https://news.google.com/rss/search?q=%22disease+outbreak%22+OR+WHO+OR+epidemic&hl=en-US&gl=US&ceid=US:en
+  type: rss
+  tier: 2
+- id: gnews_energy_ai
+  fallback_area: B6
+  label: Google News - Energia/Oil&Gas/Blackout (smistato da AI, sostituisce Rigzone bloccato)
+  url: https://news.google.com/rss/search?q=oil+OR+%22natural+gas%22+OR+OPEC+OR+LNG+OR+blackout+OR+%22power+outage%22+OR+%22energy+crisis%22&hl=en-US&gl=US&ceid=US:en
   type: rss
   tier: 2
 - id: gnews_imf_econ_ai

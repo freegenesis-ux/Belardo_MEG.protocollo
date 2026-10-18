@@ -988,6 +988,11 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
             print(f"  [EMPTY] {feed.get('id')}: HTTP {r.status_code}, {len(r.text)} byte, "
                   f"content-type={r.headers.get('content-type')}, inizio: {r.text[:160]!r}",
                   flush=True)
+            _ct = (r.headers.get("content-type") or "").lower()
+            if r.status_code == 202 or len(r.text) == 0 or "html" in _ct:
+                raise RuntimeError(
+                    f"fonte BLOCCATA (HTTP {r.status_code}, {len(r.text)} byte, {_ct or 'no content-type'}): "
+                    "probabile anti-bot sui runner cloud, non un feed vuoto")
         events = []
         entries = parsed.entries
         keywords = feed.get("keywords")
