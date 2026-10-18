@@ -54,7 +54,12 @@ AI_BATCH_SIZE = 20
 # --- Groq resilience (patch_meg_groq_cache) ---------------------------------
 AI_CACHE_TTL_HOURS = 48
 GROQ_EXHAUSTED = False
-GROQ_MODELS = [GROQ_MODEL, os.environ.get("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")]
+GROQ_MODELS = [GROQ_MODEL] + [
+    m.strip() for m in os.environ.get(
+        "GROQ_FALLBACK_MODELS",
+        "openai/gpt-oss-120b,llama-3.3-70b-versatile,qwen/qwen3.8-27b",
+    ).split(",") if m.strip()
+]
 _GROQ_MODEL_IDX = 0
 
 
@@ -66,7 +71,7 @@ def _groq_switch_model() -> bool:
     global _GROQ_MODEL_IDX
     if _GROQ_MODEL_IDX + 1 < len(GROQ_MODELS):
         _GROQ_MODEL_IDX += 1
-        print(f"  [GROQ] quota giornaliera esaurita: passo al modello {GROQ_MODELS[_GROQ_MODEL_IDX]}", flush=True)
+        print(f"  [GROQ] cambio modello (quota o errore): ora {GROQ_MODELS[_GROQ_MODEL_IDX]}", flush=True)
         return True
     return False
 
@@ -1004,6 +1009,11 @@ async def classify_titles_ai(client: httpx.AsyncClient, items: list[dict],
                     if e.response.status_code == 429 and attempt < 4:
                         await _groq_backoff(e.response, attempt)
                         continue
+                    if e.response.status_code in (400, 404) and attempt < 4:
+                        print(f"  [GROQ {e.response.status_code}] modello {_groq_model()}: "
+                              f"{e.response.text[:200]}", flush=True)
+                        if _groq_switch_model():
+                            continue
                     raise
         content = r.json()["choices"][0]["message"]["content"]
         raw = json.loads(content)
