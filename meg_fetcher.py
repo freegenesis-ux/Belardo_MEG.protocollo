@@ -984,6 +984,10 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
         else:
             r = await fetch_with_retry(client, feed["url"])
             parsed = feedparser.parse(r.text)
+        if not parsed.entries:
+            print(f"  [EMPTY] {feed.get('id')}: HTTP {r.status_code}, {len(r.text)} byte, "
+                  f"content-type={r.headers.get('content-type')}, inizio: {r.text[:160]!r}",
+                  flush=True)
         events = []
         entries = parsed.entries
         keywords = feed.get("keywords")
