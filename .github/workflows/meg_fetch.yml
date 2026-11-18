@@ -16,6 +16,11 @@ name: MEG Fetch
 # della piattaforma i cron molto frequenti possono slittare di qualche
 # minuto o saltare un ciclo — "ogni 15 min" va inteso come "circa".
 #
+# latest.jsonl e' il file del link pubblico: il ciclo "full" lo rigenera intero ogni ora;
+# il ciclo "fast" (ogni 15 min) rilegge mercati e sismologia e li FONDE in latest.jsonl
+# (meg_merge_fast.py), cosi' lo stesso file si aggiorna ogni 15 minuti. latest_fast*.jsonl
+# restano pubblicati per compatibilita'.
+#
 # Link stabile risultante:
 #   https://raw.githubusercontent.com/<utente>/<repo>/main/meg_events/latest.jsonl
 #   https://raw.githubusercontent.com/<utente>/<repo>/main/meg_events/latest_fast.jsonl
@@ -108,6 +113,21 @@ jobs:
             cat meg_events/latest_fast_b7.jsonl meg_events/latest_fast_b2.jsonl > meg_events/latest_fast.jsonl
           fi
           echo "corrupt=$corrupt" >> "$GITHUB_OUTPUT"
+
+      - name: Fonde i dati fast dentro latest.jsonl (il link unico resta sempre fresco)
+        if: steps.mode.outputs.value == 'fast' && steps.validate.outputs.corrupt != '1'
+        run: |
+          git show HEAD:meg_events/latest.jsonl > /tmp/prev_latest.jsonl 2>/dev/null || : > /tmp/prev_latest.jsonl
+          if python3 meg_merge_fast.py \
+               --base meg_events/latest.jsonl \
+               --fast meg_events/latest_fast_b7.jsonl \
+               --fast meg_events/latest_fast_b2.jsonl \
+               --out /tmp/latest_merged.jsonl \
+             && python3 meg_validate.py /tmp/latest_merged.jsonl --previous /tmp/prev_latest.jsonl; then
+            cp /tmp/latest_merged.jsonl meg_events/latest.jsonl
+          else
+            echo "::warning::Fusione fast non riuscita: latest.jsonl resta com'era (ultimo full)."
+          fi
 
       - name: Copia in archivio timestampato (solo run full)
         if: steps.mode.outputs.value == 'full' && steps.validate.outputs.corrupt != '1'
