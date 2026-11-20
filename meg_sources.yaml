@@ -54,6 +54,26 @@ sources:
       url: https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml
       type: rss
       tier: 2
+    - id: agi_news
+      label: AGI Agenzia Italia (generale)
+      url: https://www.agi.it/rss.xml
+      type: rss
+      tier: 2
+    - id: agi_politica
+      label: AGI Politica
+      url: https://www.agi.it/politica/rss
+      type: rss
+      tier: 2
+    - id: rainews_ultimora
+      label: RaiNews Ultime notizie
+      url: https://www.rainews.it/rss/ultimora
+      type: rss
+      tier: 2
+    - id: rainews_politica
+      label: RaiNews Politica
+      url: https://www.rainews.it/rss/politica
+      type: rss
+      tier: 2
     # --- Mobilitazioni di massa (soglia mass_mobilization: 500.000 / 1.500.000 persone) ---
     - id: gnews_mobilitazione_it
       label: Google News Scioperi/Cortei/Mobilitazioni (IT)
@@ -132,8 +152,8 @@ sources:
       type: rss
       tier: 1
     - id: esa_space
-      label: ESA Space News
-      url: https://www.esa.int/rssfeed/Our_Activities/Space_Safety
+      label: ESA Space News (TopNews; il feed Space_Safety dava 404)
+      url: https://www.esa.int/rssfeed/TopNews
       type: rss
       tier: 2
   B4_1:
