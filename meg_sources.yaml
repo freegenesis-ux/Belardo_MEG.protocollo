@@ -37,6 +37,34 @@ sources:
       url: https://rss.dw.com/rdf/rss-en-world
       type: rss
       tier: 2
+    # --- Cronaca e politica ITALIANA nazionale (aggiunte il 20/11/2026: lo sciopero generale
+    #     con oltre 1 milione di persone in piazza non compariva nel file) ---
+    - id: ansa_italia_top
+      label: ANSA Top News (Italia)
+      url: https://www.ansa.it/sito/ansait_rss.xml
+      type: rss
+      tier: 2
+    - id: ansa_politica
+      label: ANSA Politica
+      url: https://www.ansa.it/sito/notizie/politica/politica_rss.xml
+      type: rss
+      tier: 2
+    - id: ansa_cronaca
+      label: ANSA Cronaca
+      url: https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml
+      type: rss
+      tier: 2
+    # --- Mobilitazioni di massa (soglia mass_mobilization: 500.000 / 1.500.000 persone) ---
+    - id: gnews_mobilitazione_it
+      label: Google News Scioperi/Cortei/Mobilitazioni (IT)
+      url: https://news.google.com/rss/search?q=%22sciopero+generale%22+OR+%22manifestazione+nazionale%22+OR+%22in+piazza%22+OR+cortei&hl=it&gl=IT&ceid=IT:it
+      type: rss
+      tier: 2
+    - id: gnews_mobilization_en
+      label: Google News Mass Protests/General Strikes (EN)
+      url: https://news.google.com/rss/search?q=%22general+strike%22+OR+%22mass+protest%22+OR+%22nationwide+protests%22+OR+%22million+protesters%22&hl=en&gl=US&ceid=US:en
+      type: rss
+      tier: 2
   B2_1_2:
     label: Sismologia e Vulcanologia
     feeds:
