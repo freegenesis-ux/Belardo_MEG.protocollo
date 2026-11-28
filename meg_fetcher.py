@@ -245,7 +245,8 @@ GROQ_SEMAPHORE = asyncio.Semaphore(1)
 
 
 async def fetch_with_retry(client: httpx.AsyncClient, url: str,
-                            timeout: float = FETCH_TIMEOUT, attempts: int = 4):
+                            timeout: float = FETCH_TIMEOUT, attempts: int = 4,
+                            user_agent: str | None = None):
     """GET con retry e rotazione User-Agent. Solleva l'ultima eccezione se
     tutti i tentativi falliscono — il chiamante decide come gestirla.
     Backoff più lungo (1.5s, 3s, 4.5s...) per assorbire risoluzioni DNS
@@ -255,7 +256,7 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str,
         try:
             r = await client.get(
                 url, timeout=timeout, follow_redirects=True,
-                headers={"User-Agent": USER_AGENTS[i % len(USER_AGENTS)]})
+                headers={"User-Agent": user_agent or USER_AGENTS[i % len(USER_AGENTS)]})
             r.raise_for_status()
             return r
         except Exception as e:
@@ -982,7 +983,8 @@ async def fetch_rss_feed(client: httpx.AsyncClient, feed: dict,
                     r = await fetch_with_retry(client, feed["url"])
                     parsed = feedparser.parse(r.text)
         else:
-            r = await fetch_with_retry(client, feed["url"])
+            # user_agent opzionale per fonte (es. Guardian rifiuta i browser finti con 403)
+            r = await fetch_with_retry(client, feed["url"], user_agent=feed.get("user_agent"))
             parsed = feedparser.parse(r.text)
         if not parsed.entries:
             print(f"  [EMPTY] {feed.get('id')}: HTTP {r.status_code}, {len(r.text)} byte, "

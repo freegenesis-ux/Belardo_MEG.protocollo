@@ -8,4 +8,5 @@ jobs:
       - name: Sonda Guardian e Alto Calore dal runner
         run: |
           bash meg_probe_guardian.sh
-          { echo '### Sonda dal runner GitHub'; echo '```'; cat meg-probe-guardian-risultati.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          bash meg_probe_altocalore.sh
+          { echo '### Sonda dal runner GitHub'; echo '```'; cat meg-probe-guardian-risultati.txt meg-probe-altocalore-risultati.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
