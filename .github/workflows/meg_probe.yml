@@ -1,0 +1,11 @@
+name: MEG probe fonti
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sonda Guardian e Alto Calore dal runner
+        run: |
+          bash meg_probe_guardian.sh
+          { echo '### Sonda dal runner GitHub'; echo '```'; cat meg-probe-guardian-risultati.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
